@@ -753,7 +753,10 @@ function launchGame(qs) {
   handPositions = [];
   bonusBubbles = [];
   floatTexts   = [];
-  bubbleTimer  = Math.floor(BUBBLE_INTERVAL * .5);
+  bubbleTimer    = Math.floor(BUBBLE_INTERVAL * .5);
+  bubbleQueue    = [];     // sẽ refill tự động ở lần spawn đầu
+  bubblePairStep = 0;
+  bubblePairType = null;
   // Reset hand tracking state for fresh game
   for (const label of ['Left', 'Right']) {
     const hs = handState[label];
@@ -1314,16 +1317,32 @@ const BUBBLE_TYPES = [
 ];
 
 let bubbleTimer = 0;
-const BUBBLE_INTERVAL = 420; // frames between bubble spawns
+const BUBBLE_INTERVAL = 420; // frames between bubble pair spawns
 
-function spawnBonusBubble() {
+// ── Bubble queue: đảm bảo công bằng tuyệt đối ────────────────
+// Mỗi "đợt" spawn 1 cặp: cùng loại bóng cho cả P1 lẫn P2,
+// spawn cách nhau ~60 frame để không xuất hiện cùng lúc.
+// Thứ tự loại bóng được xáo trộn trước mỗi vòng → đúng số lượng
+// bonus/penalty cho từng bên sau mỗi BUBBLE_CYCLE lần spawn.
+const BUBBLE_CYCLE_SIZE = BUBBLE_TYPES.length; // 6 loại = 6 đợt / vòng
+let bubbleQueue   = [];   // hàng đợi loại bóng cho vòng hiện tại
+let bubblePairStep = 0;   // 0 = spawn P1, 1 = spawn P2 (cách nhau ~60f)
+let bubblePairType = null;// loại bóng đang chờ spawn cho P2
+
+function _refillBubbleQueue() {
+  // Xáo trộn danh sách loại để mỗi vòng đủ mỗi loại đúng 1 lần
+  const pool = [...BUBBLE_TYPES];
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  bubbleQueue = pool;
+}
+
+function _spawnOneSide(type, side) {
   const W = canvas.width, H = canvas.height;
-  const type = BUBBLE_TYPES[Math.floor(Math.random() * BUBBLE_TYPES.length)];
-  // Random side (both players can get bubbles on their half)
-  const side = Math.random() < .5 ? 1 : 2;
   const [zL, zR] = playerZone(side, W);
   const x = zL + (zR - zL) * (.15 + Math.random() * .7);
-
   bonusBubbles.push({
     ...type,
     x,
@@ -1337,6 +1356,25 @@ function spawnBonusBubble() {
     pulse: 0,
     radius: Math.max(38, canvas.width * 0.05),
   });
+}
+
+function spawnBonusBubble() {
+  if (bubblePairStep === 0) {
+    // Lấy loại tiếp theo từ queue (refill nếu hết)
+    if (bubbleQueue.length === 0) _refillBubbleQueue();
+    bubblePairType = bubbleQueue.pop();
+
+    // Chọn bên đầu tiên ngẫu nhiên (P1 hoặc P2)
+    const firstSide = Math.random() < .5 ? 1 : 2;
+    _spawnOneSide(bubblePairType, firstSide);
+    bubblePairStep = firstSide; // lưu bên đã spawn để biết bên còn lại
+  } else {
+    // Spawn bên còn lại với cùng loại bóng
+    const otherSide = bubblePairStep === 1 ? 2 : 1;
+    _spawnOneSide(bubblePairType, otherSide);
+    bubblePairStep  = 0;
+    bubblePairType  = null;
+  }
 }
 
 function checkBubbleSlash(x1, y1, x2, y2, player) {
@@ -1440,11 +1478,20 @@ function update(dt, rawDt) {
     if (ft.life <= 0) floatTexts.splice(i, 1);
   }
 
-  // Bonus bubbles
+  // Bonus bubbles — spawn theo cặp:
+  // Step 0: timer đầy → spawn bên 1, reset timer về BUBBLE_INTERVAL/7 (≈60f)
+  // Step 1: timer đầy lần nữa → spawn bên 2, reset về BUBBLE_INTERVAL bình thường
   bubbleTimer += dt;
   if (bubbleTimer >= BUBBLE_INTERVAL) {
-    bubbleTimer = 0;
-    spawnBonusBubble();
+    if (bubblePairStep === 0) {
+      // Bắt đầu cặp mới: spawn bên đầu tiên, đặt timer ngắn cho bên còn lại
+      bubbleTimer = BUBBLE_INTERVAL - 60; // 60f sau sẽ spawn bên kia
+      spawnBonusBubble(); // sets bubblePairStep = firstSide
+    } else {
+      // Spawn bên còn lại, kết thúc cặp
+      bubbleTimer = 0;
+      spawnBonusBubble(); // resets bubblePairStep = 0
+    }
   }
   const H = canvas.height;
   for (let i = bonusBubbles.length - 1; i >= 0; i--) {
