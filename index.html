@@ -23,7 +23,7 @@ html, body {
   width:100%; height:100%; overflow:hidden;
   background:var(--bg);
   color:var(--text);
-  font-family:'Nunito', sans-serif;
+  font-family:'Nunito', sans-serif; /* Thay đổi font chữ hỗ trợ tiếng Việt tốt hơn */
   touch-action:none;
   -webkit-tap-highlight-color:transparent;
 }
@@ -158,43 +158,6 @@ html, body {
   color:var(--p2);
   background:rgba(255,34,102,.07);
   box-shadow:0 0 24px rgba(255,34,102,.2);
-}
-
-/* Player count row */
-.player-count-row {
-  display:flex;
-  gap:12px;
-  margin-bottom:24px;
-}
-
-.player-count-btn {
-  flex:1;
-  padding:12px 10px;
-  background:transparent;
-  border:2px solid var(--border);
-  border-radius:12px;
-  color:var(--dim);
-  font-family:'Nunito',sans-serif;
-  font-size:1rem;
-  font-weight:800;
-  cursor:pointer;
-  transition:all .2s;
-  text-align:center;
-  letter-spacing:1px;
-}
-
-.player-count-btn.active[data-players="1"] {
-  border-color:var(--p1);
-  color:var(--p1);
-  background:rgba(0,238,255,.1);
-  box-shadow:0 0 18px rgba(0,238,255,.2);
-}
-
-.player-count-btn.active[data-players="2"] {
-  border-color:var(--p2);
-  color:var(--p2);
-  background:rgba(255,34,102,.1);
-  box-shadow:0 0 18px rgba(255,34,102,.2);
 }
 
 /* Textarea */
@@ -438,7 +401,7 @@ input[type=file] { display:none; }
     <div class="game-logo">
       <div class="game-logo-title">⚔️ WORD SLASHER</div>
     </div>
-    <div class="game-logo-sub">Chém Từ Vựng · Đấu trí</div>
+    <div class="game-logo-sub">Chém Từ Vựng · 2 Players</div>
 
     <div class="section-label">Chế độ điều khiển</div>
     <div class="mode-row">
@@ -452,12 +415,6 @@ input[type=file] { display:none; }
         <span>Mặt + Tay</span>
         <span class="mode-small">Face Tracking</span>
       </button>
-    </div>
-
-    <div class="section-label">Số người chơi</div>
-    <div class="player-count-row">
-      <button class="player-count-btn" data-players="1" onclick="selectPlayers(1)">👤 1 Người</button>
-      <button class="player-count-btn active" data-players="2" onclick="selectPlayers(2)">👥 2 Người</button>
     </div>
 
     <div class="section-row">
@@ -503,14 +460,14 @@ Sleep: Ngủ"></textarea>
 
 <div id="gameoverScreen">
   <div class="go-title" id="goTitle" style="color:var(--p1)">GAME OVER</div>
-  <div class="score-cards" id="goScoreCards">
+  <div class="score-cards">
     <div class="score-card s1">
       <div class="sc-player">⚡ Player 1</div>
       <div class="sc-num" id="goScore1">0</div>
       <div class="sc-label">điểm</div>
       <div id="goBadge1"></div>
     </div>
-    <div class="score-card s2" id="goCard2">
+    <div class="score-card s2">
       <div class="sc-player">🔥 Player 2</div>
       <div class="sc-num" id="goScore2">0</div>
       <div class="sc-label">điểm</div>
@@ -531,167 +488,1778 @@ Sleep: Ngủ"></textarea>
 <script>
 'use strict';
 
-// ========== GLOBALS ==========
-let gameMode = 'touch';
-let numPlayers = 2;     // 1 or 2
-let allQuestions = [];
-let savedQuestions = null;
-let bgAudio = null;
-let gs = null;
-let particles = [];
-let slashTrails = {};
-let handPositions = [];
-let bonusBubbles = [];
-let floatTexts = [];
-let handsMP = null, cameraMP = null, faceDetectMP = null;
-let detectedFaces = [];
-let frameCount = 0;
-let animFrame = null;
-let lastTS = 0;
-
-// hand tracking state
-const handState = { Left: { smoothX:-999, smoothY:-999, player:null, lastSeen:0, history:[], lockFrames:0, everSeen:false },
-                    Right:{ smoothX:-999, smoothY:-999, player:null, lastSeen:0, history:[], lockFrames:0, everSeen:false } };
-const HAND_GHOST_MS = 700;
-const SMOOTH_ALPHA = 0.48;
+// ============================================================
+//  CONSTANTS & CONFIG
+// ============================================================
 const COLORS = {
-  p1: '#00eeff', p1Dark:'rgba(0,238,255,.18)', p1Glow:'rgba(0,238,255,.5)',
-  p2: '#ff2266', p2Dark:'rgba(255,34,102,.18)', p2Glow:'rgba(255,34,102,.5)',
-  white:'#ffffff', wrongRed:'#ff4040', correctGold:'#ffdd00'
+  p1:      '#00eeff',
+  p1Dark:  'rgba(0,238,255,.18)',
+  p1Glow:  'rgba(0,238,255,.5)',
+  p2:      '#ff2266',
+  p2Dark:  'rgba(255,34,102,.18)',
+  p2Glow:  'rgba(255,34,102,.5)',
+  white:   '#ffffff',
+  wrongRed:'#ff4040',
+  correctGold: '#ffdd00',
 };
-const WORD_BASE_RADIUS = 52;
+
+const WORD_BASE_RADIUS = 52; // base min radius
 const MAX_LIVES = 3;
 const SPAWN_DELAY_FRAMES = 70;
-let bubbleTimer = 0;
-const BUBBLE_INTERVAL = 420;
-let bubbleQueue = [];
-let bubblePairStep = 0;
-let bubblePairType = null;
+
+// ============================================================
+//  SOUND ENGINE (Web Audio API — no files needed)
+// ============================================================
+let audioCtx = null;
+
+function getAudioCtx() {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  return audioCtx;
+}
+
+function playCorrectSound() {
+  try {
+    const ac = getAudioCtx();
+    const t  = ac.currentTime;
+    // Rising arpeggio: C5 → E5 → G5
+    [[523.25, 0], [659.25, .08], [783.99, .16]].forEach(([freq, delay]) => {
+      const osc  = ac.createOscillator();
+      const gain = ac.createGain();
+      osc.connect(gain); gain.connect(ac.destination);
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, t + delay);
+      gain.gain.setValueAtTime(0.22, t + delay);
+      gain.gain.exponentialRampToValueAtTime(0.001, t + delay + .22);
+      osc.start(t + delay);
+      osc.stop(t + delay + .25);
+    });
+  } catch(e) {}
+}
+
+function playWrongSound() {
+  try {
+    const ac = getAudioCtx();
+    const t  = ac.currentTime;
+    const osc  = ac.createOscillator();
+    const gain = ac.createGain();
+    osc.connect(gain); gain.connect(ac.destination);
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(220, t);
+    osc.frequency.exponentialRampToValueAtTime(80, t + .25);
+    gain.gain.setValueAtTime(0.3, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + .28);
+    osc.start(t); osc.stop(t + .3);
+  } catch(e) {}
+}
+
+function playBonusSound(isBonus) {
+  try {
+    const ac = getAudioCtx();
+    const t  = ac.currentTime;
+    const osc  = ac.createOscillator();
+    const gain = ac.createGain();
+    osc.connect(gain); gain.connect(ac.destination);
+    osc.type = 'sine';
+    if (isBonus) {
+      osc.frequency.setValueAtTime(880, t);
+      osc.frequency.exponentialRampToValueAtTime(1320, t + .15);
+    } else {
+      osc.frequency.setValueAtTime(300, t);
+      osc.frequency.exponentialRampToValueAtTime(100, t + .2);
+    }
+    gain.gain.setValueAtTime(0.25, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + .22);
+    osc.start(t); osc.stop(t + .25);
+  } catch(e) {}
+}
+
+function playComboSound(streak) {
+  try {
+    const ac = getAudioCtx();
+    const t  = ac.currentTime;
+    const freq = 440 * Math.pow(1.15, Math.min(streak, 8));
+    const osc  = ac.createOscillator();
+    const gain = ac.createGain();
+    osc.connect(gain); gain.connect(ac.destination);
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(freq, t);
+    osc.frequency.exponentialRampToValueAtTime(freq * 1.5, t + .12);
+    gain.gain.setValueAtTime(0.2, t);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + .2);
+    osc.start(t); osc.stop(t + .22);
+  } catch(e) {}
+}
+
+// ============================================================
+//  GLOBALS
+// ============================================================
+const canvas  = document.getElementById('gameCanvas');
+const ctx     = canvas.getContext('2d');
+
+let gameMode    = 'touch';   // 'touch' | 'camera'
+let allQuestions = [];        // all parsed {q, a}
+let savedQuestions = null;    // kept for replay
+let bgAudio    = null;
+
+let gs         = null;        // game state (null when not playing)
+let particles  = [];
+let slashTrails = {};         // keyed by pointer/hand id
+let handPositions = [];       // [{x, y, player}]
+let bonusBubbles = [];        // special score bubbles
+let floatTexts   = [];        // floating score popup texts
+
+let handsMP      = null;
+let cameraMP     = null;
+let faceDetectMP = null;
+let detectedFaces = [];
+let frameCount   = 0;
+
+// Stable per-hand state keyed by handedness label ('Left' | 'Right').
+// MediaPipe handedness labels are stable across frames, unlike numeric indices.
+const handState = {
+  Left:  { smoothX:-999, smoothY:-999, player:null, lastSeen:0, history:[], lockFrames:0, everSeen:false },
+  Right: { smoothX:-999, smoothY:-999, player:null, lastSeen:0, history:[], lockFrames:0, everSeen:false },
+};
+const HAND_GHOST_MS = 700;   // keep cursor + slash active for 700ms after losing track
+const SMOOTH_ALPHA  = 0.48;  // position EMA smoothing factor
+
+let animFrame  = null;
+
+// ============================================================
+//  SETUP UI
+// ============================================================
+function selectMode(m) {
+  gameMode = m;
+  document.querySelectorAll('.mode-btn').forEach(b => {
+    b.classList.toggle('active', b.dataset.mode === m);
+  });
+}
+
+// Docx upload
+document.getElementById('docxFile').addEventListener('change', async e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  if (typeof mammoth === 'undefined') {
+    setStatus('Thư viện mammoth chưa tải xong, thử lại.', 'err');
+    return;
+  }
+  try {
+    const ab = await file.arrayBuffer();
+    const res = await mammoth.extractRawText({ arrayBuffer: ab });
+    document.getElementById('questionText').value = res.value.trim();
+    document.getElementById('docxLabel').classList.add('loaded');
+    document.getElementById('docxIcon').textContent = '✅';
+    setStatus(`Đã tải: ${file.name}`, 'ok');
+  } catch(err) {
+    setStatus('Lỗi đọc file docx!', 'err');
+  }
+});
+
+// Music upload
+document.getElementById('musicFile').addEventListener('change', e => {
+  const file = e.target.files[0];
+  if (!file) return;
+  if (bgAudio) { bgAudio.pause(); bgAudio = null; }
+  bgAudio = new Audio(URL.createObjectURL(file));
+  bgAudio.loop = true;
+  bgAudio.volume = 0.55;
+  document.getElementById('musicLabel').classList.add('loaded');
+  document.getElementById('musicIcon').textContent = '✅';
+  setStatus(`Nhạc: ${file.name}`, 'ok');
+});
+
+function setStatus(msg, type = '') {
+  const el = document.getElementById('statusMsg');
+  el.textContent = msg;
+  el.className = 'status-line ' + type;
+}
+
+// ============================================================
+//  QUESTION PARSING
+// ============================================================
+function parseQuestions(text) {
+  const lines = text.split('\n').map(l => l.trim()).filter(l => l.length > 2);
+  const result = [];
+  for (const line of lines) {
+    // Skip comment lines
+    if (line.startsWith('#') || line.startsWith('//')) continue;
+    const m = line.match(/^(.+?)\s*[:=]\s*(.+)$/);
+    if (m) {
+      const q = m[1].trim();
+      const a = m[2].trim();
+      if (q && a) result.push({ q, a });
+    }
+  }
+  return result;
+}
+
+function buildWrongAnswers(correctAnswer, count = 3) {
+  const pool = allQuestions.map(q => q.a).filter(a => a !== correctAnswer);
+  shuffleArr(pool);
+  // Pad if pool is small
+  while (pool.length < count) pool.push('???');
+  return pool.slice(0, count);
+}
+
+// ============================================================
+//  GAME INIT
+// ============================================================
+async function initGame() {
+  const raw = document.getElementById('questionText').value;
+  const parsed = parseQuestions(raw);
+
+  if (parsed.length < 6) {
+    setStatus('Cần ít nhất 6 câu hỏi để chơi!', 'err');
+    return;
+  }
+
+  allQuestions  = parsed;
+  savedQuestions = parsed;
+
+  document.getElementById('setupScreen').style.display = 'none';
+  resizeCanvas();
+
+  if (gameMode === 'camera') {
+    document.getElementById('camLoading').style.display = 'flex';
+    document.getElementById('camVideo').style.display = 'block';
+    try {
+      await initHandTracking();
+    } catch(e) {
+      console.warn('Hand tracking init failed:', e);
+    }
+    document.getElementById('camLoading').style.display = 'none';
+  }
+
+  launchGame(parsed);
+}
+
+function launchGame(qs) {
+  resizeCanvas();
+  document.getElementById('gameCanvas').style.display = 'block';
+
+  const shuffled = shuffleArr([...qs]);
+  const mid = Math.floor(shuffled.length / 2);
+
+  gs = {
+    p1: createPlayer(1, shuffled.slice(0, mid)),
+    p2: createPlayer(2, shuffled.slice(mid)),
+    timeLeft: 90, // Đếm ngược 90 giây
+    running: true,
+    over: false
+  };
+
+  particles = [];
+  slashTrails = {};
+  handPositions = [];
+  bonusBubbles = [];
+  floatTexts   = [];
+  bubbleTimer    = Math.floor(BUBBLE_INTERVAL * .5);
+  bubbleQueue    = [];     // sẽ refill tự động ở lần spawn đầu
+  bubblePairStep = 0;
+  bubblePairType = null;
+  // Reset hand tracking state for fresh game
+  for (const label of ['Left', 'Right']) {
+    const hs = handState[label];
+    hs.smoothX = -999; hs.smoothY = -999;
+    hs.player = null; hs.lastSeen = 0;
+    hs.history = []; hs.lockFrames = 0;
+    hs.everSeen = false;
+  }
+  detectedFaces = [];
+  frameCount    = 0;
+
+  if (gameMode === 'touch') {
+    setupTouchEvents();
+  }
+
+  if (bgAudio) {
+    bgAudio.currentTime = 0;
+    bgAudio.play().catch(() => {});
+  }
+
+  if (animFrame) cancelAnimationFrame(animFrame);
+  lastTS = performance.now();
+  animFrame = requestAnimationFrame(gameLoop);
+}
+
+function createPlayer(num, questions) {
+  return {
+    num,
+    questions,
+    qIdx: 0,
+    lives: MAX_LIVES,
+    score: 0,
+    words: [],
+    spawnDelay: 0,
+    needsSpawn: true,
+    done: false,
+    flashOk: 0,
+    flashErr: 0,
+    correctStreak: 0,
+    comboDisplay: 0,   // frames to show combo label
+    lastCombo: 0,      // streak count at last display
+  };
+}
+
+// ============================================================
+//  REPLAY / BACK
+// ============================================================
+function replayGame() {
+  if (!savedQuestions || savedQuestions.length < 6) return;
+  allQuestions = savedQuestions;
+  document.getElementById('gameoverScreen').style.display = 'none';
+  cleanupGame();
+  launchGame(savedQuestions);
+}
+
+function backToSetup() {
+  document.getElementById('gameoverScreen').style.display = 'none';
+  cleanupGame();
+  document.getElementById('gameCanvas').style.display = 'none';
+  document.getElementById('camVideo').style.display = 'none';
+  document.getElementById('setupScreen').style.display = 'flex';
+}
+
+function cleanupGame() {
+  if (gs) gs.running = false;
+  if (bgAudio) bgAudio.pause();
+  removeTouchEvents();
+  // Don't stop camera — keep it running for quick replay
+}
+
+function stopCamera() {
+  if (cameraMP)    { try { cameraMP.stop(); }    catch(e){} cameraMP    = null; }
+  if (handsMP)     { try { handsMP.close(); }    catch(e){} handsMP     = null; }
+  if (faceDetectMP){ try { faceDetectMP.close();} catch(e){} faceDetectMP= null; }
+}
+
+// ============================================================
+//  CANVAS RESIZE
+// ============================================================
+function resizeCanvas() {
+  canvas.width  = window.innerWidth;
+  canvas.height = window.innerHeight;
+}
+
+window.addEventListener('resize', () => {
+  resizeCanvas();
+});
+
+// ============================================================
+//  WORD SPAWNING
+// ============================================================
+function spawnWordsForPlayer(p) {
+  if (p.qIdx >= p.questions.length) {
+    p.done = true;
+    checkGameOver();
+    return;
+  }
+
+  const q = p.questions[p.qIdx];
+  const wrongs = buildWrongAnswers(q.a, 3);
+  const choices = shuffleArr([q.a, ...wrongs]);
+
+  const W = canvas.width;
+  const H = canvas.height;
+  const [zL, zR] = playerZone(p.num, W);
+  const zW = zR - zL;
+
+  const baseFontSize = Math.max(15, Math.min(20, canvas.width * 0.017));
+  ctx.font = `700 ${baseFontSize}px Nunito`;
+  const lineH = baseFontSize * 1.25;   // khoảng cách giữa các dòng
+
+  // Helper: chia text thành dòng nếu > WORD_WRAP_THRESHOLD từ
+  const WORD_WRAP_THRESHOLD = 3;
+  function wrapText(text) {
+    const words = text.split(' ');
+    if (words.length <= WORD_WRAP_THRESHOLD) return [text];
+    // Chia đều thành 2 dòng
+    const mid = Math.ceil(words.length / 2);
+    return [words.slice(0, mid).join(' '), words.slice(mid).join(' ')];
+  }
+
+  p.words = choices.map((text, i) => {
+    const col = (i + 1) / (choices.length + 1);
+    const jitter = (Math.random() - .5) * zW * .12;
+    const x = zL + zW * col + jitter;
+
+    const lines = wrapText(text);
+    // Bán kính = nửa dòng rộng nhất + padding, cộng thêm chiều cao nếu 2 dòng
+    const maxLineW = Math.max(...lines.map(l => ctx.measureText(l).width));
+    const textH    = lines.length > 1 ? lineH * lines.length : 0;
+    const r = Math.max(WORD_BASE_RADIUS, maxLineW / 2 + 16, textH / 2 + 20);
+
+    const startY = H + r + 30 + Math.random() * 100;
+    const speed  = 1.3 + Math.random() * 1.1;
+    const vx     = (Math.random() - .5) * 0.9;
+
+    return {
+      text,
+      lines,          // dòng đã wrap
+      isCorrect: text === q.a,
+      x, y: startY,
+      vx, vy: -speed,
+      radius: r,
+      fontSize: baseFontSize,
+      lineH,
+      slashed: false,
+      wrongAnim: 0,
+      wobble: Math.random() * Math.PI * 2,
+      scale: 1,
+      alpha: 1,
+    };
+  });
+
+  p.needsSpawn = false;
+}
+
+function playerZone(num, W) {
+  const gap = 6;
+  if (num === 1) return [gap, W / 2 - gap];
+  return [W / 2 + gap, W - gap];
+}
+
+// ============================================================
+//  TOUCH INPUT
+// ============================================================
+let activePointers = {};
+
+function setupTouchEvents() {
+  canvas.addEventListener('pointerdown',  onPtrDown,   { passive: false });
+  canvas.addEventListener('pointermove',  onPtrMove,   { passive: false });
+  canvas.addEventListener('pointerup',    onPtrUp,     { passive: false });
+  canvas.addEventListener('pointercancel',onPtrUp,     { passive: false });
+}
+
+function removeTouchEvents() {
+  canvas.removeEventListener('pointerdown',  onPtrDown);
+  canvas.removeEventListener('pointermove',  onPtrMove);
+  canvas.removeEventListener('pointerup',    onPtrUp);
+  canvas.removeEventListener('pointercancel',onPtrUp);
+}
+
+function onPtrDown(e) {
+  e.preventDefault();
+  const x = e.clientX, y = e.clientY;
+  const player = x < canvas.width / 2 ? 1 : 2;
+  activePointers[e.pointerId] = { x, y, player };
+  const key = 't' + e.pointerId;
+  slashTrails[key] = {
+    points: [{ x, y, t: performance.now() }],
+    player,
+    color: player === 1 ? COLORS.p1 : COLORS.p2,
+    fading: false
+  };
+}
+
+function onPtrMove(e) {
+  e.preventDefault();
+  const prev = activePointers[e.pointerId];
+  if (!prev) return;
+
+  const x = e.clientX, y = e.clientY;
+  const key = 't' + e.pointerId;
+
+  // Slash check
+  checkSlashLine(prev.x, prev.y, x, y, prev.player);
+
+  // Update trail
+  if (!slashTrails[key]) {
+    slashTrails[key] = { points:[], player: prev.player,
+      color: prev.player === 1 ? COLORS.p1 : COLORS.p2, fading: false };
+  }
+  slashTrails[key].points.push({ x, y, t: performance.now() });
+  if (slashTrails[key].points.length > 18) slashTrails[key].points.shift();
+
+  activePointers[e.pointerId] = { ...prev, x, y };
+}
+
+function onPtrUp(e) {
+  const key = 't' + e.pointerId;
+  if (slashTrails[key]) slashTrails[key].fading = true;
+  delete activePointers[e.pointerId];
+}
+
+// ============================================================
+//  CAMERA / FACE DETECTION + HAND TRACKING  (v2 — robust)
+// ============================================================
+async function initHandTracking() {
+  const video = document.getElementById('camVideo');
+
+  // ── 1. FaceDetection (runs every 5th frame to save CPU) ───
+  if (typeof FaceDetection !== 'undefined') {
+    faceDetectMP = new FaceDetection({
+      locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/${f}`
+    });
+    faceDetectMP.setOptions({ model: 'short', minDetectionConfidence: 0.48 });
+    faceDetectMP.onResults(onFaceDetectionResults);
+  }
+
+  // ── 2. Hands (runs every frame) ────────────────────────────
+  if (typeof Hands !== 'undefined') {
+    handsMP = new Hands({
+      locateFile: f => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`
+    });
+    handsMP.setOptions({
+      maxNumHands: 2,
+      modelComplexity: 0,
+      minDetectionConfidence: 0.5,
+      minTrackingConfidence: 0.4,
+    });
+    handsMP.onResults(onHandResults);
+  }
+
+  // ── 3. Camera loop ─────────────────────────────────────────
+  if (typeof Camera !== 'undefined') {
+    cameraMP = new Camera(video, {
+      onFrame: async () => {
+        frameCount++;
+        // Hands every frame; face every 5th frame
+        if (handsMP) await handsMP.send({ image: video });
+        if (faceDetectMP && frameCount % 5 === 0) await faceDetectMP.send({ image: video });
+      },
+      width: 640, height: 480
+    });
+    await cameraMP.start();
+  } else {
+    const stream = await navigator.mediaDevices.getUserMedia({
+      video: { width: 640, height: 480, facingMode: 'user' }
+    });
+    video.srcObject = stream;
+    await new Promise(r => video.onloadeddata = r);
+    const loop = async () => {
+      frameCount++;
+      if (handsMP) await handsMP.send({ image: video });
+      if (faceDetectMP && frameCount % 5 === 0) await faceDetectMP.send({ image: video });
+      requestAnimationFrame(loop);
+    };
+    requestAnimationFrame(loop);
+  }
+}
+
+// ── Face results ───────────────────────────────────────────────
+function onFaceDetectionResults(results) {
+  if (!results?.detections?.length) return;
+  const W = canvas.width;
+  const faces = results.detections.map(det => ({
+    x: (1 - det.boundingBox.xCenter) * W   // mirror to match video display
+  })).sort((a, b) => a.x - b.x);           // left → right
+
+  // Assign players by position
+  if (faces.length >= 2) { faces[0].player = 1; faces[1].player = 2; }
+  else                    { faces[0].player = faces[0].x < W / 2 ? 1 : 2; }
+  detectedFaces = faces;
+}
+
+// ── Resolve player for a hand at mirrored screen-X ────────────
+function resolvePlayerForHand(sx) {
+  if (detectedFaces.length > 0) {
+    // Find nearest face (use a generous 55% width threshold)
+    let nearest = null, minDist = Infinity;
+    for (const f of detectedFaces) {
+      const d = Math.abs(f.x - sx);
+      if (d < minDist) { minDist = d; nearest = f; }
+    }
+    if (nearest && minDist < canvas.width * 0.55) return nearest.player;
+  }
+  return sx < canvas.width / 2 ? 1 : 2;  // fallback: left/right midpoint
+}
+
+// ── Hand results ───────────────────────────────────────────────
+// Key insight: we track by HANDEDNESS LABEL ('Left'/'Right') which is
+// stable across frames, unlike the numeric index MediaPipe assigns.
+function onHandResults(results) {
+  if (!gs || !gs.running) return;
+
+  const now = performance.now();
+  const W = canvas.width, H = canvas.height;
+
+  // Process each detected hand this frame
+  if (results.multiHandLandmarks?.length > 0) {
+    results.multiHandLandmarks.forEach((landmarks, i) => {
+      // Handedness is the stable identifier
+      const handedness = results.multiHandedness?.[i];
+      if (!handedness) return;
+      const label = handedness.label; // 'Left' or 'Right'
+      const hs = handState[label];
+      if (!hs) return;
+
+      const tip = landmarks[8];  // index-finger tip (landmark 8)
+
+      // Mirror flip: video is CSS transform:scaleX(-1), so flip x
+      const rawX = (1 - tip.x) * W;
+      const rawY = tip.y * H;
+
+      // ── Exponential moving average smoothing ──────────────
+      if (!hs.everSeen) {
+        hs.smoothX = rawX;
+        hs.smoothY = rawY;
+        hs.everSeen = true;
+      } else {
+        hs.smoothX += SMOOTH_ALPHA * (rawX - hs.smoothX);
+        hs.smoothY += SMOOTH_ALPHA * (rawY - hs.smoothY);
+      }
+      hs.lastSeen = now;
+
+      // ── Player assignment (by face, then frozen) ──────────
+      if (hs.player === null) {
+        hs.player = resolvePlayerForHand(rawX);
+        hs.lockFrames = 80;
+      }
+
+      // ── Velocity → slash ─────────────────────────────────
+      const hist = hs.history;
+      const prev = hist.length ? hist[hist.length - 1] : null;
+      hist.push({ x: hs.smoothX, y: hs.smoothY, t: now });
+      if (hist.length > 30) hist.shift();
+
+      if (prev && now - prev.t < 150) {
+        const dx = hs.smoothX - prev.x, dy = hs.smoothY - prev.y;
+        const dist = Math.hypot(dx, dy);
+        const elapsed = now - prev.t;
+        const pxPerFrame = elapsed > 0 ? dist / elapsed * 16.67 : 0;
+        // Lower threshold than before (12 px/frame) for better responsiveness
+        if (pxPerFrame > 12) {
+          checkSlashLine(prev.x, prev.y, hs.smoothX, hs.smoothY, hs.player);
+        }
+      }
+
+      // ── Slash trail ───────────────────────────────────────
+      const key = 'h' + label;
+      if (!slashTrails[key]) {
+        slashTrails[key] = {
+          points: [], player: hs.player,
+          color: hs.player === 1 ? COLORS.p1 : COLORS.p2, fading: false
+        };
+      }
+      // Always update color in case player was re-assigned
+      slashTrails[key].color = hs.player === 1 ? COLORS.p1 : COLORS.p2;
+      slashTrails[key].points.push({ x: hs.smoothX, y: hs.smoothY, t: now });
+      if (slashTrails[key].points.length > 24) slashTrails[key].points.shift();
+      slashTrails[key].fading = false;
+    });
+  }
+
+  // ── Build handPositions for rendering ─────────────────────
+  // Include "ghost" hands (recently lost) so cursor fades out gracefully.
+  handPositions = [];
+  for (const label of ['Left', 'Right']) {
+    const hs = handState[label];
+    if (!hs.everSeen) continue;
+
+    const age = now - hs.lastSeen;
+    if (age > HAND_GHOST_MS) {
+      // Expired → full reset so hand gets re-assigned on next detection
+      hs.player = null;
+      hs.everSeen = false;
+      hs.history = [];
+      const key = 'h' + label;
+      if (slashTrails[key]) slashTrails[key].fading = true;
+      continue;
+    }
+
+    if (hs.player === null) continue;
+
+    const ghostAlpha = Math.max(0, 1 - age / HAND_GHOST_MS);
+    const inZone = hs.player === 1 ? hs.smoothX < W / 2 : hs.smoothX >= W / 2;
+
+    handPositions.push({
+      x: hs.smoothX, y: hs.smoothY,
+      player: hs.player, inZone,
+      ghostAlpha,
+      lockFrames: hs.lockFrames,
+    });
+
+    if (hs.lockFrames > 0) hs.lockFrames--;
+  }
+}
+// ============================================================
+//  SLASH COLLISION
+// ============================================================
+function checkSlashLine(x1, y1, x2, y2, player) {
+  if (!gs || !gs.running) return;
+
+  let cx1 = x1, cy1 = y1, cx2 = x2, cy2 = y2;
+
+  // Touch mode: clip segment to player's own half to prevent cross-zone slashing.
+  // Camera mode: skip clip — hand tracking already binds each hand to the correct
+  // player, and clipping can drop valid slashes when hand is near the center line.
+  if (gameMode !== 'camera') {
+    const W    = canvas.width;
+    const zMin = player === 1 ? 0     : W / 2;
+    const zMax = player === 1 ? W / 2 : W;
+    let tMin = 0, tMax = 1;
+    const dx = x2 - x1;
+    if (Math.abs(dx) > 0.001) {
+      const ta = (zMin - x1) / dx;
+      const tb = (zMax - x1) / dx;
+      tMin = Math.max(tMin, Math.min(ta, tb));
+      tMax = Math.min(tMax, Math.max(ta, tb));
+    } else {
+      if (x1 < zMin || x1 > zMax) return;
+    }
+    if (tMin >= tMax) return;
+    const dx2 = x2 - x1;
+    cx1 = x1 + tMin * dx2; cy1 = y1 + tMin * (y2 - y1);
+    cx2 = x1 + tMax * dx2; cy2 = y1 + tMax * (y2 - y1);
+  }
+
+  const p = player === 1 ? gs.p1 : gs.p2;
+  if (!p.done && p.spawnDelay <= 0 && !p.needsSpawn) {
+    for (const w of p.words) {
+      if (w.slashed || w.wrongAnim > 0) continue;
+      if (segmentCircle(cx1, cy1, cx2, cy2, w.x, w.y, w.radius)) {
+        doSlash(w, p);
+      }
+    }
+  }
+  checkBubbleSlash(cx1, cy1, cx2, cy2, player);
+}
+
+function segmentCircle(ax, ay, bx, by, cx, cy, r) {
+  const dx = bx - ax, dy = by - ay;
+  const fx = ax - cx, fy = ay - cy;
+  const a = dx*dx + dy*dy;
+  if (a === 0) return fx*fx + fy*fy <= r*r;
+  const b = 2 * (fx*dx + fy*dy);
+  const c = fx*fx + fy*fy - r*r;
+  let d = b*b - 4*a*c;
+  if (d < 0) return false;
+  d = Math.sqrt(d);
+  const t1 = (-b - d) / (2*a);
+  const t2 = (-b + d) / (2*a);
+  return (t1 >= 0 && t1 <= 1) || (t2 >= 0 && t2 <= 1) || (t1 < 0 && t2 > 1);
+}
+
+// ============================================================
+//  SLASH LOGIC
+// ============================================================
+function doSlash(word, p) {
+  word.slashed = true;
+
+  if (word.isCorrect) {
+    p.correctStreak++;
+    const combo = p.correctStreak;
+    // Combo multiplier: +1 base, +1 per extra streak (capped at +5)
+    const bonus = Math.min(combo - 1, 5);
+    const gained = 1 + bonus;
+    p.score += gained;
+    p.flashOk = 50;
+
+    // Sound
+    if (combo >= 3) playComboSound(combo);
+    else playCorrectSound();
+
+    // Combo display
+    if (combo >= 2) {
+      p.comboDisplay = 90;
+      p.lastCombo = combo;
+    }
+
+    const col = p.num === 1 ? COLORS.p1 : COLORS.p2;
+    burst(word.x, word.y, col, 28);
+    burst(word.x, word.y, '#ffffff', 12);
+    burst(word.x, word.y, COLORS.correctGold, 8);
+
+    // Float text: score gained
+    const label = gained > 1 ? `+${gained} COMBO x${combo}!` : `+1`;
+    spawnFloatText(word.x, word.y, label, gained > 1 ? '#ffdd00' : col);
+
+    p.words = [];
+    p.qIdx++;
+
+    if (p.qIdx >= p.questions.length) {
+      p.done = true;
+      checkGameOver();
+    } else {
+      p.spawnDelay = SPAWN_DELAY_FRAMES;
+      p.needsSpawn = true;
+    }
+
+  } else {
+    // Wrong answer
+    word.slashed  = false;
+    word.wrongAnim = 60;
+    p.flashErr    = 50;
+    p.correctStreak = 0;
+    p.comboDisplay  = 0;
+    p.lives--;
+    playWrongSound();
+    burst(word.x, word.y, COLORS.wrongRed, 14);
+    spawnFloatText(word.x, word.y - 20, '✗ SAI!', COLORS.wrongRed);
+
+    if (p.lives <= 0) {
+      p.lives = 0;
+      p.done  = true;
+      p.words = [];
+      checkGameOver();
+    }
+  }
+}
+
+// ============================================================
+//  FLOAT TEXTS (score popups)
+// ============================================================
+function spawnFloatText(x, y, text, color) {
+  floatTexts.push({ x, y, text, color, life: 1, vy: -2.2 });
+}
+
+// ============================================================
+//  BONUS BUBBLES
+// ============================================================
 const BUBBLE_TYPES = [
-  { icon:'⭐', label:'+2', value:2, color:'#ffdd00', type:'bonus' },
-  { icon:'💎', label:'+3', value:3, color:'#00ffcc', type:'bonus' },
-  { icon:'⚡', label:'+1', value:1, color:'#ffaa00', type:'bonus' },
-  { icon:'💣', label:'-1', value:-1, color:'#ff6600', type:'penalty' },
-  { icon:'💀', label:'-2', value:-2, color:'#cc44ff', type:'penalty' },
-  { icon:'🔥', label:'COMBO!', value:0, color:'#ff4488', type:'combo' }
+  { icon:'⭐', label:'+2', value: 2,  color:'#ffdd00', type:'bonus' },
+  { icon:'💎', label:'+3', value: 3,  color:'#00ffcc', type:'bonus' },
+  { icon:'⚡', label:'+1', value: 1,  color:'#ffaa00', type:'bonus' },
+  { icon:'💣', label:'-1', value:-1,  color:'#ff6600', type:'penalty' },
+  { icon:'💀', label:'-2', value:-2,  color:'#cc44ff', type:'penalty' },
+  { icon:'🔥', label:'COMBO!', value: 0, color:'#ff4488', type:'combo' },
 ];
 
-// ========== UTILITIES ==========
-function shuffleArr(arr) { for (let i=arr.length-1; i>0; i--) { const j=Math.floor(Math.random()*(i+1)); [arr[i],arr[j]]=[arr[j],arr[i]]; } return arr; }
-function hexAlpha(hex,a) { const r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),b=parseInt(hex.slice(5,7),16); return `rgba(${r},${g},${b},${a})`; }
-function roundRect(ctx,x,y,w,h,r){ ctx.beginPath(); ctx.moveTo(x+r,y); ctx.lineTo(x+w-r,y); ctx.quadraticCurveTo(x+w,y,x+w,y+r); ctx.lineTo(x+w,y+h-r); ctx.quadraticCurveTo(x+w,y+h,x+w-r,y+h); ctx.lineTo(x+r,y+h); ctx.quadraticCurveTo(x,y+h,x,y+h-r); ctx.lineTo(x,y+r); ctx.quadraticCurveTo(x,y,x+r,y); ctx.closePath(); }
+let bubbleTimer = 0;
+const BUBBLE_INTERVAL = 420; // frames between bubble pair spawns
 
-// audio
-let audioCtx = null;
-function getAudioCtx(){ if(!audioCtx) audioCtx = new (window.AudioContext||window.webkitAudioContext)(); return audioCtx; }
-function playCorrectSound(){ try{ const ac=getAudioCtx(),t=ac.currentTime; [[523.25,0],[659.25,.08],[783.99,.16]].forEach(([f,d])=>{ const osc=ac.createOscillator(),g=ac.createGain(); osc.connect(g); g.connect(ac.destination); osc.type='sine'; osc.frequency.setValueAtTime(f,t+d); g.gain.setValueAtTime(0.22,t+d); g.gain.exponentialRampToValueAtTime(0.001,t+d+.22); osc.start(t+d); osc.stop(t+d+.25); }); }catch(e){} }
-function playWrongSound(){ try{ const ac=getAudioCtx(),t=ac.currentTime,osc=ac.createOscillator(),g=ac.createGain(); osc.connect(g); g.connect(ac.destination); osc.type='sawtooth'; osc.frequency.setValueAtTime(220,t); osc.frequency.exponentialRampToValueAtTime(80,t+.25); g.gain.setValueAtTime(0.3,t); g.gain.exponentialRampToValueAtTime(0.001,t+.28); osc.start(t); osc.stop(t+.3); }catch(e){} }
-function playBonusSound(isBonus){ try{ const ac=getAudioCtx(),t=ac.currentTime,osc=ac.createOscillator(),g=ac.createGain(); osc.connect(g); g.connect(ac.destination); osc.type='sine'; if(isBonus){ osc.frequency.setValueAtTime(880,t); osc.frequency.exponentialRampToValueAtTime(1320,t+.15); }else{ osc.frequency.setValueAtTime(300,t); osc.frequency.exponentialRampToValueAtTime(100,t+.2); } g.gain.setValueAtTime(0.25,t); g.gain.exponentialRampToValueAtTime(0.001,t+.22); osc.start(t); osc.stop(t+.25); }catch(e){} }
-function playComboSound(streak){ try{ const ac=getAudioCtx(),t=ac.currentTime,freq=440*Math.pow(1.15,Math.min(streak,8)),osc=ac.createOscillator(),g=ac.createGain(); osc.connect(g); g.connect(ac.destination); osc.type='triangle'; osc.frequency.setValueAtTime(freq,t); osc.frequency.exponentialRampToValueAtTime(freq*1.5,t+.12); g.gain.setValueAtTime(0.2,t); g.gain.exponentialRampToValueAtTime(0.001,t+.2); osc.start(t); osc.stop(t+.22); }catch(e){} }
+// ── Bubble queue: đảm bảo công bằng tuyệt đối ────────────────
+// Mỗi "đợt" spawn 1 cặp: cùng loại bóng cho cả P1 lẫn P2,
+// spawn cách nhau ~60 frame để không xuất hiện cùng lúc.
+// Thứ tự loại bóng được xáo trộn trước mỗi vòng → đúng số lượng
+// bonus/penalty cho từng bên sau mỗi BUBBLE_CYCLE lần spawn.
+const BUBBLE_CYCLE_SIZE = BUBBLE_TYPES.length; // 6 loại = 6 đợt / vòng
+let bubbleQueue   = [];   // hàng đợi loại bóng cho vòng hiện tại
+let bubblePairStep = 0;   // 0 = spawn P1, 1 = spawn P2 (cách nhau ~60f)
+let bubblePairType = null;// loại bóng đang chờ spawn cho P2
 
-function selectMode(m){ gameMode=m; document.querySelectorAll('.mode-btn').forEach(b=>b.classList.toggle('active',b.dataset.mode===m)); }
-function selectPlayers(n){ numPlayers=n; document.querySelectorAll('.player-count-btn').forEach(b=>b.classList.toggle('active',parseInt(b.dataset.players)===n)); }
+function _refillBubbleQueue() {
+  // Xáo trộn danh sách loại để mỗi vòng đủ mỗi loại đúng 1 lần
+  const pool = [...BUBBLE_TYPES];
+  for (let i = pool.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [pool[i], pool[j]] = [pool[j], pool[i]];
+  }
+  bubbleQueue = pool;
+}
 
-// docx & music
-document.getElementById('docxFile').addEventListener('change',async e=>{ const file=e.target.files[0]; if(!file) return; try{ const ab=await file.arrayBuffer(); const res=await mammoth.extractRawText({arrayBuffer:ab}); document.getElementById('questionText').value=res.value.trim(); document.getElementById('docxLabel').classList.add('loaded'); document.getElementById('docxIcon').textContent='✅'; setStatus(`Đã tải: ${file.name}`,'ok'); }catch(err){ setStatus('Lỗi docx!','err'); } });
-document.getElementById('musicFile').addEventListener('change',e=>{ const file=e.target.files[0]; if(!file) return; if(bgAudio){bgAudio.pause();bgAudio=null;} bgAudio=new Audio(URL.createObjectURL(file)); bgAudio.loop=true; bgAudio.volume=0.55; document.getElementById('musicLabel').classList.add('loaded'); document.getElementById('musicIcon').textContent='✅'; setStatus(`Nhạc: ${file.name}`,'ok'); });
-function setStatus(msg,type=''){ const el=document.getElementById('statusMsg'); el.textContent=msg; el.className='status-line '+type; }
+function _spawnOneSide(type, side) {
+  const W = canvas.width, H = canvas.height;
+  const [zL, zR] = playerZone(side, W);
+  const x = zL + (zR - zL) * (.15 + Math.random() * .7);
+  bonusBubbles.push({
+    ...type,
+    x,
+    y: H + 40,
+    vy: -(1.0 + Math.random() * .8),
+    vx: (Math.random() - .5) * .7,
+    wobble: Math.random() * Math.PI * 2,
+    side,
+    life: 1,
+    slashed: false,
+    pulse: 0,
+    radius: Math.max(38, canvas.width * 0.05),
+  });
+}
 
-function parseQuestions(text){ const lines=text.split('\n').map(l=>l.trim()).filter(l=>l.length>2),res=[]; for(const line of lines){ if(line.startsWith('#')||line.startsWith('//')) continue; const m=line.match(/^(.+?)\s*[:=]\s*(.+)$/); if(m) res.push({q:m[1].trim(),a:m[2].trim()}); } return res; }
-function buildWrongAnswers(correctAnswer,count=3){ const pool=allQuestions.map(q=>q.a).filter(a=>a!==correctAnswer); shuffleArr(pool); while(pool.length<count) pool.push('???'); return pool.slice(0,count); }
+function spawnBonusBubble() {
+  if (bubblePairStep === 0) {
+    // Lấy loại tiếp theo từ queue (refill nếu hết)
+    if (bubbleQueue.length === 0) _refillBubbleQueue();
+    bubblePairType = bubbleQueue.pop();
 
-function createPlayer(num,questions){ return { num, questions, qIdx:0, lives:MAX_LIVES, score:0, words:[], spawnDelay:0, needsSpawn:true, done:false, flashOk:0, flashErr:0, correctStreak:0, comboDisplay:0, lastCombo:0 }; }
+    // Chọn bên đầu tiên ngẫu nhiên (P1 hoặc P2)
+    const firstSide = Math.random() < .5 ? 1 : 2;
+    _spawnOneSide(bubblePairType, firstSide);
+    bubblePairStep = firstSide; // lưu bên đã spawn để biết bên còn lại
+  } else {
+    // Spawn bên còn lại với cùng loại bóng
+    const otherSide = bubblePairStep === 1 ? 2 : 1;
+    _spawnOneSide(bubblePairType, otherSide);
+    bubblePairStep  = 0;
+    bubblePairType  = null;
+  }
+}
 
-function playerZone(playerNum,W){ if(numPlayers===1 && playerNum===1) return [0,W]; if(playerNum===1) return [6, W/2-6]; return [W/2+6, W-6]; }
+function checkBubbleSlash(x1, y1, x2, y2, player) {
+  for (const b of bonusBubbles) {
+    if (b.slashed) continue;
+    if (b.side !== player) continue;
+    if (segmentCircle(x1, y1, x2, y2, b.x, b.y, b.radius)) {
+      b.slashed = true;
+      applyBubble(b, player);
+    }
+  }
+}
 
-function spawnWordsForPlayer(p){ if(p.qIdx>=p.questions.length){ p.done=true; checkGameOver(); return; }
-  const q=p.questions[p.qIdx]; const wrongs=buildWrongAnswers(q.a,3); const choices=shuffleArr([q.a,...wrongs]); const W=canvas.width; const [zL,zR]=playerZone(p.num,W); const baseFontSize=Math.max(15,Math.min(20,canvas.width*0.017)); ctx.font=`700 ${baseFontSize}px Nunito`; const lineH=baseFontSize*1.25;
-  function wrapText(txt){ const words=txt.split(' '); if(words.length<=3) return [txt]; const mid=Math.ceil(words.length/2); return [words.slice(0,mid).join(' '), words.slice(mid).join(' ')]; }
-  p.words=choices.map((text,i)=>{ const col=(i+1)/(choices.length+1); const jitter=(Math.random()-.5)*(zR-zL)*.12; const x=zL+(zR-zL)*col+jitter; const lines=wrapText(text); const maxLineW=Math.max(...lines.map(l=>ctx.measureText(l).width)); const textH=lines.length>1?lineH*lines.length:0; const r=Math.max(WORD_BASE_RADIUS, maxLineW/2+16, textH/2+20); const startY=canvas.height+r+30+Math.random()*100; const speed=1.3+Math.random()*1.1; const vx=(Math.random()-.5)*0.9; return { text, lines, isCorrect:text===q.a, x, y:startY, vx, vy:-speed, radius:r, fontSize:baseFontSize, lineH, slashed:false, wrongAnim:0, wobble:Math.random()*Math.PI*2, scale:1, alpha:1 }; });
-  p.needsSpawn=false; }
+function applyBubble(b, player) {
+  const p = player === 1 ? gs.p1 : gs.p2;
+  playBonusSound(b.value >= 0);
 
-function checkGameOver(){ if(!gs) return; const bothDone= (numPlayers===1 ? gs.p1.done : (gs.p1.done && gs.p2.done)); if(!bothDone && gs.timeLeft>0) return; gs.running=false; gs.over=true; setTimeout(()=>showGameOverScreen(),1600); }
+  if (b.type === 'bonus' || b.type === 'penalty') {
+    p.score = Math.max(0, p.score + b.value);
+    const sign = b.value >= 0 ? `+${b.value}` : `${b.value}`;
+    spawnFloatText(b.x, b.y, `${b.icon} ${sign}`, b.color);
+    burst(b.x, b.y, b.color, b.value >= 0 ? 22 : 14);
+  } else if (b.type === 'combo') {
+    p.correctStreak = Math.max(p.correctStreak, 3);
+    spawnFloatText(b.x, b.y, '🔥 COMBO BOOST!', b.color);
+    burst(b.x, b.y, b.color, 30);
+  }
 
-function showGameOverScreen(){ if(bgAudio) bgAudio.pause(); removeTouchEvents(); const s1=gs.p1.score, s2=gs.p2?gs.p2.score:0; document.getElementById('goScore1').textContent=s1; document.getElementById('goScore2').textContent=s2; document.getElementById('goBadge1').innerHTML=''; document.getElementById('goBadge2').innerHTML=''; const card2=document.getElementById('goCard2'); if(numPlayers===1) card2.style.display='none'; else card2.style.display='block';
-  const title=document.getElementById('goTitle'); if(numPlayers===1){ title.textContent='🏆 KẾT THÚC'; title.style.color='var(--p1)'; document.getElementById('goBadge1').innerHTML='<span class="winner-badge">⭐ ĐIỂM CỦA BẠN</span>'; }
-  else if(s1>s2){ title.textContent='🏆 PLAYER 1 THẮNG!'; title.style.color='var(--p1)'; document.getElementById('goBadge1').innerHTML='<span class="winner-badge">⭐ WINNER</span>'; }
-  else if(s2>s1){ title.textContent='🏆 PLAYER 2 THẮNG!'; title.style.color='var(--p2)'; document.getElementById('goBadge2').innerHTML='<span class="winner-badge">⭐ WINNER</span>'; }
-  else{ title.textContent='🤝 HOÀ!'; title.style.color='#ffcc00'; }
-  document.getElementById('gameoverScreen').style.display='flex'; }
+  if (b.value >= 0 || b.type === 'combo') {
+    b.slashedGood = true;
+  }
+}
+function burst(x, y, color, count) {
+  for (let i = 0; i < count; i++) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = 3 + Math.random() * 9;
+    particles.push({
+      x, y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed - 2,
+      color,
+      life: 1,
+      decay: .018 + Math.random() * .03,
+      size:  2 + Math.random() * 5,
+      trail: Math.random() < .3,
+    });
+  }
+}
 
-// ========== SLASH LOGIC ==========
-function segmentCircle(ax,ay,bx,by,cx,cy,r){ const dx=bx-ax,dy=by-ay, fx=ax-cx,fy=ay-cy; const a=dx*dx+dy*dy; if(a===0) return fx*fx+fy*fy<=r*r; const b=2*(fx*dx+fy*dy), c=fx*fx+fy*fy-r*r; let d=b*b-4*a*c; if(d<0) return false; d=Math.sqrt(d); const t1=(-b-d)/(2*a), t2=(-b+d)/(2*a); return (t1>=0&&t1<=1)||(t2>=0&&t2<=1)||(t1<0&&t2>1); }
-function checkSlashLine(x1,y1,x2,y2,player){ if(!gs||!gs.running) return; let cx1=x1,cy1=y1,cx2=x2,cy2=y2; if(gameMode!=='camera' && numPlayers===2){ const W=canvas.width, zMin=player===1?0:W/2, zMax=player===1?W/2:W; let tMin=0,tMax=1,dx=x2-x1; if(Math.abs(dx)>0.001){ const ta=(zMin-x1)/dx, tb=(zMax-x1)/dx; tMin=Math.max(tMin,Math.min(ta,tb)); tMax=Math.min(tMax,Math.max(ta,tb)); }else if(x1<zMin||x1>zMax) return; if(tMin>=tMax) return; const dx2=x2-x1; cx1=x1+tMin*dx2; cy1=y1+tMin*(y2-y1); cx2=x1+tMax*dx2; cy2=y1+tMax*(y2-y1); }
-  const p=player===1?gs.p1:gs.p2; if(!p||p.done||p.spawnDelay>0||p.needsSpawn) return;
-  for(const w of p.words){ if(w.slashed||w.wrongAnim>0) continue; if(segmentCircle(cx1,cy1,cx2,cy2,w.x,w.y,w.radius)) doSlash(w,p); }
-  checkBubbleSlash(cx1,cy1,cx2,cy2,player); }
-function doSlash(word,p){ word.slashed=true; if(word.isCorrect){ p.correctStreak++; const combo=p.correctStreak; const bonus=Math.min(combo-1,5); const gained=1+bonus; p.score+=gained; p.flashOk=50; if(combo>=3) playComboSound(combo); else playCorrectSound(); if(combo>=2){ p.comboDisplay=90; p.lastCombo=combo; } const col=p.num===1?COLORS.p1:COLORS.p2; burst(word.x,word.y,col,28); burst(word.x,word.y,'#ffffff',12); burst(word.x,word.y,COLORS.correctGold,8); spawnFloatText(word.x,word.y,gained>1?`+${gained} COMBO x${combo}!`:`+1`,gained>1?'#ffdd00':col); p.words=[]; p.qIdx++; if(p.qIdx>=p.questions.length){ p.done=true; checkGameOver(); }else{ p.spawnDelay=SPAWN_DELAY_FRAMES; p.needsSpawn=true; } }else{ word.slashed=false; word.wrongAnim=60; p.flashErr=50; p.correctStreak=0; p.comboDisplay=0; p.lives--; playWrongSound(); burst(word.x,word.y,COLORS.wrongRed,14); spawnFloatText(word.x,word.y-20,'✗ SAI!',COLORS.wrongRed); if(p.lives<=0){ p.lives=0; p.done=true; p.words=[]; checkGameOver(); } } }
-function burst(x,y,color,count){ for(let i=0;i<count;i++){ const angle=Math.random()*Math.PI*2, speed=3+Math.random()*9; particles.push({x,y,vx:Math.cos(angle)*speed,vy:Math.sin(angle)*speed-2,color,life:1,decay:.018+Math.random()*.03,size:2+Math.random()*5,trail:Math.random()<.3}); } }
-function spawnFloatText(x,y,text,color){ floatTexts.push({x,y,text,color,life:1,vy:-2.2}); }
+// ============================================================
+//  GAME LOOP
+// ============================================================
+let lastTS = 0;
 
-// bonus bubbles (adjusted for 1 player)
-function _refillBubbleQueue(){ const pool=[...BUBBLE_TYPES]; for(let i=pool.length-1;i>0;i--){ const j=Math.floor(Math.random()*(i+1)); [pool[i],pool[j]]=[pool[j],pool[i]]; } bubbleQueue=pool; }
-function _spawnOneSide(type,side){ const W=canvas.width, H=canvas.height; const [zL,zR]=playerZone(side,W); const x=zL+(zR-zL)*(.15+Math.random()*.7); bonusBubbles.push({...type,x,y:H+40,vy:-(1.0+Math.random()*.8),vx:(Math.random()-.5)*.7,wobble:Math.random()*Math.PI*2,side,life:1,slashed:false,pulse:0,radius:Math.max(38,canvas.width*0.05)}); }
-function spawnBonusBubble(){ if(numPlayers===1){ if(bubbleQueue.length===0) _refillBubbleQueue(); const type=bubbleQueue.pop(); _spawnOneSide(type,1); return; }
-  if(bubblePairStep===0){ if(bubbleQueue.length===0) _refillBubbleQueue(); bubblePairType=bubbleQueue.pop(); const firstSide=Math.random()<.5?1:2; _spawnOneSide(bubblePairType,firstSide); bubblePairStep=firstSide; }else{ const otherSide=bubblePairStep===1?2:1; _spawnOneSide(bubblePairType,otherSide); bubblePairStep=0; bubblePairType=null; } }
-function checkBubbleSlash(x1,y1,x2,y2,player){ for(const b of bonusBubbles){ if(b.slashed) continue; if(b.side!==player) continue; if(segmentCircle(x1,y1,x2,y2,b.x,b.y,b.radius)){ b.slashed=true; const p=player===1?gs.p1:gs.p2; if(!p) continue; playBonusSound(b.value>=0); if(b.type==='bonus'||b.type==='penalty'){ p.score=Math.max(0,p.score+b.value); const sign=b.value>=0?`+${b.value}`:`${b.value}`; spawnFloatText(b.x,b.y,`${b.icon} ${sign}`,b.color); burst(b.x,b.y,b.color,b.value>=0?22:14); }else if(b.type==='combo'){ p.correctStreak=Math.max(p.correctStreak,3); spawnFloatText(b.x,b.y,'🔥 COMBO BOOST!',b.color); burst(b.x,b.y,b.color,30); } b.slashedGood=true; } } }
+function gameLoop(ts) {
+  if (!gs || !gs.running) return;
 
-// camera + face tracking adapted for 1P
-function resolvePlayerForHand(sx){ if(numPlayers===1) return 1; if(detectedFaces.length>0){ let nearest=null,minDist=Infinity; for(const f of detectedFaces){ const d=Math.abs(f.x-sx); if(d<minDist){minDist=d;nearest=f;} } if(nearest&&minDist<canvas.width*0.55) return nearest.player; } return sx<canvas.width/2?1:2; }
-function onFaceDetectionResults(results){ if(numPlayers===1){ detectedFaces=results?.detections?.length?[{player:1,x:0}]:[]; return; } if(!results?.detections?.length) return; const W=canvas.width; const faces=results.detections.map(det=>({x:(1-det.boundingBox.xCenter)*W})).sort((a,b)=>a.x-b.x); if(faces.length>=2){ faces[0].player=1; faces[1].player=2; }else faces[0].player=faces[0].x<W/2?1:2; detectedFaces=faces; }
-async function initHandTracking(){ const video=document.getElementById('camVideo'); if(typeof FaceDetection!=='undefined'){ faceDetectMP=new FaceDetection({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/face_detection/${f}`}); faceDetectMP.setOptions({model:'short',minDetectionConfidence:0.48}); faceDetectMP.onResults(onFaceDetectionResults); }
-  if(typeof Hands!=='undefined'){ handsMP=new Hands({locateFile:f=>`https://cdn.jsdelivr.net/npm/@mediapipe/hands/${f}`}); handsMP.setOptions({maxNumHands:2,modelComplexity:0,minDetectionConfidence:0.5,minTrackingConfidence:0.4}); handsMP.onResults(onHandResults); }
-  if(typeof Camera!=='undefined'){ cameraMP=new Camera(video,{onFrame:async()=>{ frameCount++; if(handsMP) await handsMP.send({image:video}); if(faceDetectMP&&frameCount%5===0) await faceDetectMP.send({image:video}); },width:640,height:480}); await cameraMP.start(); }else{ const stream=await navigator.mediaDevices.getUserMedia({video:{width:640,height:480,facingMode:'user'}}); video.srcObject=stream; await new Promise(r=>video.onloadeddata=r); const loop=async()=>{ frameCount++; if(handsMP) await handsMP.send({image:video}); if(faceDetectMP&&frameCount%5===0) await faceDetectMP.send({image:video}); requestAnimationFrame(loop); }; requestAnimationFrame(loop); } }
-function onHandResults(results){ if(!gs||!gs.running) return; const now=performance.now(),W=canvas.width,H=canvas.height; if(results.multiHandLandmarks?.length){ results.multiHandLandmarks.forEach((landmarks,i)=>{ const handedness=results.multiHandedness?.[i]; if(!handedness) return; const label=handedness.label; const hs=handState[label]; if(!hs) return; const tip=landmarks[8]; const rawX=(1-tip.x)*W, rawY=tip.y*H; if(!hs.everSeen){ hs.smoothX=rawX; hs.smoothY=rawY; hs.everSeen=true; }else{ hs.smoothX+=SMOOTH_ALPHA*(rawX-hs.smoothX); hs.smoothY+=SMOOTH_ALPHA*(rawY-hs.smoothY); } hs.lastSeen=now; if(hs.player===null){ hs.player=resolvePlayerForHand(rawX); hs.lockFrames=80; } const hist=hs.history; const prev=hist.length?hist[hist.length-1]:null; hist.push({x:hs.smoothX,y:hs.smoothY,t:now}); if(hist.length>30) hist.shift(); if(prev&&now-prev.t<150){ const dx=hs.smoothX-prev.x,dy=hs.smoothY-prev.y,dist=Math.hypot(dx,dy),elapsed=now-prev.t,pxPerFrame=elapsed>0?dist/elapsed*16.67:0; if(pxPerFrame>12) checkSlashLine(prev.x,prev.y,hs.smoothX,hs.smoothY,hs.player); } const key='h'+label; if(!slashTrails[key]) slashTrails[key]={points:[],player:hs.player,color:hs.player===1?COLORS.p1:COLORS.p2,fading:false}; slashTrails[key].color=hs.player===1?COLORS.p1:COLORS.p2; slashTrails[key].points.push({x:hs.smoothX,y:hs.smoothY,t:now}); if(slashTrails[key].points.length>24) slashTrails[key].points.shift(); slashTrails[key].fading=false; }); }
-  handPositions=[]; for(const label of ['Left','Right']){ const hs=handState[label]; if(!hs.everSeen) continue; const age=now-hs.lastSeen; if(age>HAND_GHOST_MS){ hs.player=null; hs.everSeen=false; hs.history=[]; const key='h'+label; if(slashTrails[key]) slashTrails[key].fading=true; continue; } if(hs.player===null) continue; const ghostAlpha=Math.max(0,1-age/HAND_GHOST_MS); const inZone= (numPlayers===1) || (hs.player===1?hs.smoothX<W/2:hs.smoothX>=W/2); handPositions.push({x:hs.smoothX,y:hs.smoothY,player:hs.player,inZone,ghostAlpha,lockFrames:hs.lockFrames}); if(hs.lockFrames>0) hs.lockFrames--; } }
+  const rawDt = ts - lastTS;
+  lastTS = ts;
+  const dt = Math.min(rawDt / 16.67, 3);
 
-// touch events (unchanged)
-let activePointers={};
-function setupTouchEvents(){ canvas.addEventListener('pointerdown',onPtrDown,{passive:false}); canvas.addEventListener('pointermove',onPtrMove,{passive:false}); canvas.addEventListener('pointerup',onPtrUp,{passive:false}); canvas.addEventListener('pointercancel',onPtrUp,{passive:false}); }
-function removeTouchEvents(){ canvas.removeEventListener('pointerdown',onPtrDown); canvas.removeEventListener('pointermove',onPtrMove); canvas.removeEventListener('pointerup',onPtrUp); canvas.removeEventListener('pointercancel',onPtrUp); }
-function onPtrDown(e){ e.preventDefault(); const x=e.clientX,y=e.clientY; let player=1; if(numPlayers===2) player=x<canvas.width/2?1:2; activePointers[e.pointerId]={x,y,player}; const key='t'+e.pointerId; slashTrails[key]={points:[{x,y,t:performance.now()}],player,color:player===1?COLORS.p1:COLORS.p2,fading:false}; }
-function onPtrMove(e){ e.preventDefault(); const prev=activePointers[e.pointerId]; if(!prev) return; const x=e.clientX,y=e.clientY; checkSlashLine(prev.x,prev.y,x,y,prev.player); const key='t'+e.pointerId; if(!slashTrails[key]) slashTrails[key]={points:[],player:prev.player,color:prev.player===1?COLORS.p1:COLORS.p2,fading:false}; slashTrails[key].points.push({x,y,t:performance.now()}); if(slashTrails[key].points.length>18) slashTrails[key].points.shift(); activePointers[e.pointerId]={...prev,x,y}; }
-function onPtrUp(e){ const key='t'+e.pointerId; if(slashTrails[key]) slashTrails[key].fading=true; delete activePointers[e.pointerId]; }
+  update(dt, rawDt);
+  render();
 
-// game init
-async function initGame(){ const raw=document.getElementById('questionText').value; const parsed=parseQuestions(raw); if(parsed.length<6){ setStatus('Cần ít nhất 6 câu hỏi!','err'); return; } allQuestions=parsed; savedQuestions=parsed; document.getElementById('setupScreen').style.display='none'; resizeCanvas(); if(gameMode==='camera'){ document.getElementById('camLoading').style.display='flex'; document.getElementById('camVideo').style.display='block'; try{ await initHandTracking(); }catch(e){ console.warn(e); } document.getElementById('camLoading').style.display='none'; } launchGame(parsed); }
-function launchGame(qs){ resizeCanvas(); document.getElementById('gameCanvas').style.display='block'; const shuffled=shuffleArr([...qs]); if(numPlayers===1){ gs={p1:createPlayer(1,shuffled), p2:null, timeLeft:90, running:true, over:false}; }else{ const mid=Math.floor(shuffled.length/2); gs={p1:createPlayer(1,shuffled.slice(0,mid)), p2:createPlayer(2,shuffled.slice(mid)), timeLeft:90, running:true, over:false}; } particles=[]; slashTrails={}; handPositions=[]; bonusBubbles=[]; floatTexts=[]; bubbleTimer=0; bubbleQueue=[]; bubblePairStep=0; bubblePairType=null; for(const label of ['Left','Right']){ const hs=handState[label]; hs.smoothX=-999; hs.smoothY=-999; hs.player=null; hs.lastSeen=0; hs.history=[]; hs.lockFrames=0; hs.everSeen=false; } detectedFaces=[]; frameCount=0; if(gameMode==='touch') setupTouchEvents(); if(bgAudio){ bgAudio.currentTime=0; bgAudio.play().catch(()=>{}); } if(animFrame) cancelAnimationFrame(animFrame); lastTS=performance.now(); animFrame=requestAnimationFrame(gameLoop); }
-function replayGame(){ if(!savedQuestions||savedQuestions.length<6) return; allQuestions=savedQuestions; document.getElementById('gameoverScreen').style.display='none'; cleanupGame(); launchGame(savedQuestions); }
-function backToSetup(){ document.getElementById('gameoverScreen').style.display='none'; cleanupGame(); document.getElementById('gameCanvas').style.display='none'; document.getElementById('camVideo').style.display='none'; document.getElementById('setupScreen').style.display='flex'; }
-function cleanupGame(){ if(gs) gs.running=false; if(bgAudio) bgAudio.pause(); removeTouchEvents(); }
-function resizeCanvas(){ canvas.width=window.innerWidth; canvas.height=window.innerHeight; }
-window.addEventListener('resize',()=>resizeCanvas());
+  if (!gs.over) animFrame = requestAnimationFrame(gameLoop);
+}
 
-// game loop & render (simplified – keep original visual but adapt for 1P)
-let canvas=document.getElementById('gameCanvas'), ctx=canvas.getContext('2d');
-function gameLoop(ts){ if(!gs||!gs.running) return; const rawDt=ts-lastTS; lastTS=ts; const dt=Math.min(rawDt/16.67,3); update(dt,rawDt); render(); if(!gs.over) animFrame=requestAnimationFrame(gameLoop); }
-function update(dt,rawDt){ if(gs.timeLeft>0){ gs.timeLeft-=rawDt/1000; if(gs.timeLeft<=0){ gs.timeLeft=0; gs.p1.done=true; if(gs.p2) gs.p2.done=true; checkGameOver(); } } updatePlayer(gs.p1,dt); if(gs.p2) updatePlayer(gs.p2,dt); for(let i=particles.length-1;i>=0;i--){ const p=particles[i]; p.x+=p.vx*dt; p.y+=p.vy*dt; p.vy+=0.18*dt; p.life-=p.decay*dt; if(p.life<=0) particles.splice(i,1); } for(let i=floatTexts.length-1;i>=0;i--){ const ft=floatTexts[i]; ft.y+=ft.vy*dt; ft.life-=0.022*dt; if(ft.life<=0) floatTexts.splice(i,1); } bubbleTimer+=dt; if(bubbleTimer>=BUBBLE_INTERVAL){ spawnBonusBubble(); bubbleTimer=0; } const H=canvas.height; for(let i=bonusBubbles.length-1;i>=0;i--){ const b=bonusBubbles[i]; b.wobble+=0.04*dt; b.pulse+=0.08*dt; b.x+=b.vx*dt; b.y+=b.vy*dt; if(b.slashed){ b.life-=0.06*dt; if(b.life<=0) bonusBubbles.splice(i,1); }else if(b.y+b.radius<-20) bonusBubbles.splice(i,1); } if(gs.p1.flashOk>0) gs.p1.flashOk-=dt; if(gs.p1.flashErr>0) gs.p1.flashErr-=dt; if(gs.p1.comboDisplay>0) gs.p1.comboDisplay-=dt; if(gs.p2){ if(gs.p2.flashOk>0) gs.p2.flashOk-=dt; if(gs.p2.flashErr>0) gs.p2.flashErr-=dt; if(gs.p2.comboDisplay>0) gs.p2.comboDisplay-=dt; } const now=performance.now(); for(const key in slashTrails){ const tr=slashTrails[key]; tr.points=tr.points.filter(pt=>now-pt.t<220); if(tr.points.length===0&&tr.fading) delete slashTrails[key]; } }
-function updatePlayer(p,dt){ if(p.done) return; if(p.spawnDelay>0){ p.spawnDelay-=dt; if(p.spawnDelay<=0&&p.needsSpawn) spawnWordsForPlayer(p); return; } if(p.needsSpawn){ spawnWordsForPlayer(p); return; } const W=canvas.width,H=canvas.height; const [zL,zR]=playerZone(p.num,W); for(const w of p.words){ if(w.slashed) continue; w.wobble+=0.035*dt; w.x+=w.vx*dt; w.y+=w.vy*dt; if(w.x-w.radius<zL){ w.vx=Math.abs(w.vx); w.x=zL+w.radius; } if(w.x+w.radius>zR){ w.vx=-Math.abs(w.vx); w.x=zR-w.radius; } if(w.y+w.radius<-20){ w.y=H+w.radius+Math.random()*60; w.x=zL+(zR-zL)*(.15+Math.random()*.7); w.vy=-(1.3+Math.random()*1.0); } if(w.wrongAnim>0) w.wrongAnim-=dt; } }
+// ============================================================
+//  UPDATE
+// ============================================================
+function update(dt, rawDt) {
+  // Timer countdown
+  if (gs.timeLeft > 0) {
+    gs.timeLeft -= rawDt / 1000;
+    if (gs.timeLeft <= 0) {
+      gs.timeLeft = 0;
+      gs.p1.done = true;
+      gs.p2.done = true;
+      checkGameOver();
+    }
+  }
 
-// rendering – keep original but condition on gs.p2 existence
-function render(){ const W=canvas.width,H=canvas.height; ctx.clearRect(0,0,W,H); if(gameMode!=='camera'){ ctx.fillStyle='#080810'; ctx.fillRect(0,0,W,H); drawGrid(W,H); }else{ ctx.fillStyle='rgba(4,4,12,.55)'; ctx.fillRect(0,0,W,H); } drawZoneTint(gs.p1,0,0,W/2,H); if(gs.p2) drawZoneTint(gs.p2,W/2,0,W/2,H); drawZoneLabel(1,W,H); if(gs.p2) drawZoneLabel(2,W,H); if(numPlayers===2) drawDivider(W,H); drawPlayerWords(gs.p1); if(gs.p2) drawPlayerWords(gs.p2); drawBonusBubbles(); drawParticles(); drawFloatTexts(); drawSlashTrails(); if(gameMode==='camera') drawHandCursors(); drawHUD(W,H); drawQuestions(W,H); if(gs.p1.done) drawDoneOverlay(1,W,H); if(gs.p2&&gs.p2.done) drawDoneOverlay(2,W,H); }
-function drawGrid(W,H){ ctx.save(); ctx.strokeStyle='rgba(0,238,255,.025)'; ctx.lineWidth=1; const g=44; for(let x=0;x<W;x+=g){ ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); } for(let y=0;y<H;y+=g){ ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke(); } ctx.restore(); }
-function drawZoneTint(p,x,y,w,h){ if(p.flashOk>0){ ctx.fillStyle=`rgba(${p.num===1?'0,238,255':'255,34,102'},${p.flashOk/50*.1})`; ctx.fillRect(x,y,w,h); }else if(p.flashErr>0){ ctx.fillStyle=`rgba(255,40,40,${p.flashErr/50*.18})`; ctx.fillRect(x,y,w,h); } }
-function drawZoneLabel(num,W,H){ const col=num===1?COLORS.p1:COLORS.p2; const cx=num===1?W/4:W*3/4; ctx.save(); ctx.font=`bold ${Math.min(120,W*.12)}px Bangers`; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillStyle=hexAlpha(col,.04); ctx.fillText(`P${num}`,cx,H/2); ctx.restore(); }
-function drawDivider(W,H){ const x=W/2; const grd=ctx.createLinearGradient(x,0,x,H); grd.addColorStop(0,'transparent'); grd.addColorStop(.15,COLORS.p1); grd.addColorStop(.5,'#ffffff'); grd.addColorStop(.85,COLORS.p2); grd.addColorStop(1,'transparent'); ctx.save(); ctx.shadowColor='#ffffff'; ctx.shadowBlur=18; ctx.strokeStyle=grd; ctx.lineWidth=2.5; ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke(); ctx.restore(); }
-function drawPlayerWords(p){ for(const w of p.words){ if(w.slashed&&w.wrongAnim<=0) continue; const col=p.num===1?COLORS.p1:COLORS.p2; const wobX=Math.sin(w.wobble)*4; const wrongProgress=w.wrongAnim/60; ctx.save(); ctx.globalAlpha=w.slashed?0:Math.max(.2,1-(1-wrongProgress)*.5+wrongProgress*.5); ctx.translate(w.x+wobX,w.y); ctx.shadowColor=col; ctx.shadowBlur=22; const gr=ctx.createRadialGradient(0,-w.radius*.15,0,0,0,w.radius); gr.addColorStop(0,hexAlpha(col,.3)); gr.addColorStop(.6,hexAlpha(col,.12)); gr.addColorStop(1,hexAlpha(col,.03)); ctx.beginPath(); ctx.arc(0,0,w.radius,0,Math.PI*2); ctx.fillStyle=gr; ctx.fill(); ctx.strokeStyle=col; ctx.lineWidth=1.8; ctx.stroke(); ctx.shadowBlur=0; ctx.strokeStyle=hexAlpha('#ffffff',.2); ctx.lineWidth=1; ctx.beginPath(); ctx.arc(-w.radius*.2,-w.radius*.3,w.radius*.4,Math.PI*1.2,Math.PI*1.9); ctx.stroke(); ctx.font=`700 ${w.fontSize}px Nunito`; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillStyle='#ffffff'; ctx.shadowColor=col; ctx.shadowBlur=8; const lines=w.lines||[w.text]; const lh=w.lineH||w.fontSize*1.25; const totalH=(lines.length-1)*lh; lines.forEach((line,li)=>{ ctx.fillText(line,0,-totalH/2+li*lh); }); ctx.shadowBlur=0; if(w.wrongAnim>0){ const xa=Math.min(1,wrongProgress*3); ctx.strokeStyle=`rgba(255,50,50,${xa})`; ctx.lineWidth=4; ctx.lineCap='round'; const sz=w.radius*.55; ctx.beginPath(); ctx.moveTo(-sz,-sz); ctx.lineTo(sz,sz); ctx.moveTo(sz,-sz); ctx.lineTo(-sz,sz); ctx.stroke(); } ctx.restore(); } }
-function drawBonusBubbles(){ for(const b of bonusBubbles){ if(b.life<=0) continue; const wobX=Math.sin(b.wobble)*5; const pulse=1+Math.sin(b.pulse)*.07; ctx.save(); ctx.globalAlpha=b.slashed?Math.max(0,b.life):1; ctx.translate(b.x+wobX,b.y); ctx.scale(pulse,pulse); ctx.shadowColor=b.color; ctx.shadowBlur=28; ctx.strokeStyle=b.color; ctx.lineWidth=2.5; ctx.setLineDash([8,5]); ctx.beginPath(); ctx.arc(0,0,b.radius,0,Math.PI*2); ctx.stroke(); ctx.setLineDash([]); const gr=ctx.createRadialGradient(0,-b.radius*.2,0,0,0,b.radius); gr.addColorStop(0,hexAlpha(b.color,.35)); gr.addColorStop(1,hexAlpha(b.color,.07)); ctx.beginPath(); ctx.arc(0,0,b.radius,0,Math.PI*2); ctx.fillStyle=gr; ctx.fill(); ctx.shadowBlur=0; ctx.font=`${Math.round(b.radius*.68)}px serif`; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillText(b.icon,0,-4); ctx.font=`800 ${Math.round(b.radius*.32)}px Nunito`; ctx.fillStyle=b.color; ctx.shadowColor=b.color; ctx.shadowBlur=6; ctx.fillText(b.label,0,b.radius*.62); ctx.restore(); } }
-function drawParticles(){ for(const p of particles){ ctx.save(); ctx.globalAlpha=Math.max(0,p.life); ctx.fillStyle=p.color; ctx.shadowColor=p.color; ctx.shadowBlur=10; ctx.beginPath(); ctx.arc(p.x,p.y,Math.max(.5,p.size*p.life),0,Math.PI*2); ctx.fill(); ctx.restore(); } }
-function drawFloatTexts(){ for(const ft of floatTexts){ ctx.save(); ctx.globalAlpha=Math.max(0,ft.life); ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.font=`800 ${ft.text.length>6?18:26}px Nunito`; ctx.fillStyle=ft.color; ctx.shadowColor=ft.color; ctx.shadowBlur=14; ctx.fillText(ft.text,ft.x,ft.y); ctx.restore(); } }
-function drawSlashTrails(){ const now=performance.now(); for(const key in slashTrails){ const tr=slashTrails[key]; if(tr.points.length<2) continue; ctx.save(); ctx.lineCap='round'; ctx.lineJoin='round'; for(let i=1;i<tr.points.length;i++){ const pt=tr.points[i],prev=tr.points[i-1]; const age=now-pt.t, a=Math.max(0,1-age/200)*.85, w=(i/tr.points.length)*7; ctx.globalAlpha=a; ctx.strokeStyle=tr.color; ctx.shadowColor=tr.color; ctx.shadowBlur=12; ctx.lineWidth=w; ctx.beginPath(); ctx.moveTo(prev.x,prev.y); ctx.lineTo(pt.x,pt.y); ctx.stroke(); } const tip=tr.points[tr.points.length-1]; const tipAge=now-tip.t, tipA=Math.max(0,1-tipAge/120); ctx.globalAlpha=tipA; ctx.fillStyle='#ffffff'; ctx.shadowColor='#ffffff'; ctx.shadowBlur=20; ctx.beginPath(); ctx.arc(tip.x,tip.y,4,0,Math.PI*2); ctx.fill(); ctx.restore(); } }
-function drawHandCursors(){ for(const h of handPositions){ if(!h) continue; const col=h.player===1?COLORS.p1:COLORS.p2; const isNew=h.lockFrames>0; const lockT=isNew?1-h.lockFrames/80:1; const gAlpha=h.ghostAlpha??1; ctx.save(); ctx.globalAlpha=gAlpha; const baseR=22; const popScale=isNew?1+Math.sin(lockT*Math.PI)*0.8:1; if(h.inZone){ ctx.strokeStyle=col; ctx.fillStyle=hexAlpha(col,.15); ctx.shadowColor=col; ctx.shadowBlur=30; }else{ ctx.strokeStyle='#ff4040'; ctx.fillStyle='rgba(255,40,40,.08)'; ctx.shadowColor='#ff4040'; ctx.shadowBlur=18; ctx.globalAlpha=gAlpha*0.6; } ctx.lineWidth=2.5; ctx.beginPath(); ctx.arc(h.x,h.y,baseR*popScale,0,Math.PI*2); ctx.fill(); ctx.stroke(); ctx.shadowBlur=0; ctx.globalAlpha=h.inZone?gAlpha:gAlpha*0.5; ctx.fillStyle=col; ctx.beginPath(); ctx.arc(h.x,h.y,4,0,Math.PI*2); ctx.fill(); if(isNew&&lockT<0.85){ const labelAlpha=lockT<0.15?lockT/0.15:lockT>0.7?1-(lockT-0.7)/0.15:1; ctx.globalAlpha=labelAlpha*gAlpha; ctx.font=`800 ${Math.round(14+6*Math.sin(lockT*Math.PI))}px Nunito`; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillStyle=col; ctx.shadowColor=col; ctx.shadowBlur=18; ctx.fillText(`🔒 P${h.player} LOCKED`,h.x,h.y-baseR-18); ctx.shadowBlur=0; } if(!h.inZone){ ctx.globalAlpha=0.75*gAlpha; ctx.font='800 13px Nunito'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.fillStyle='#ff4040'; ctx.shadowColor='#ff4040'; ctx.shadowBlur=10; ctx.fillText('⛔ SAI VÙNG',h.x,h.y-baseR-14); ctx.shadowBlur=0; } ctx.globalAlpha=1; ctx.restore(); } }
-function drawHUD(W,H){ drawPlayerHUD(gs.p1,18,14,'left'); if(gs.p2) drawPlayerHUD(gs.p2,W-18,14,'right'); drawProgress(gs.p1,W/4,10); if(gs.p2) drawProgress(gs.p2,W*3/4,10); drawTimer(W,H); if(gameMode==='camera') drawHandLockStatus(W,H); }
-function drawPlayerHUD(p,x,y,align){ const col=p.num===1?COLORS.p1:COLORS.p2; ctx.save(); ctx.textAlign=align; ctx.textBaseline='top'; ctx.font='bold 36px Bangers'; ctx.fillStyle=col; ctx.shadowColor=col; ctx.shadowBlur=12; ctx.fillText(p.score,x,y); ctx.shadowBlur=0; const full='❤️',empty='🖤'; const heartStr=full.repeat(p.lives)+empty.repeat(MAX_LIVES-p.lives); ctx.font=`${Math.max(18,Math.min(24,canvas.width*.027))}px serif`; ctx.fillText(heartStr,x,y+40); if(p.comboDisplay>0&&p.lastCombo>=2){ const ca=Math.min(1,p.comboDisplay/30); ctx.globalAlpha=ca; ctx.font=`bold ${Math.min(22,canvas.width*.025)}px Bangers`; ctx.fillStyle='#ffdd00'; ctx.shadowColor='#ff8800'; ctx.shadowBlur=16; const cx=p.num===1?x+2:x-2; const labelAlign=align; ctx.textAlign=labelAlign; ctx.fillText(`🔥 ${p.lastCombo}x COMBO!`,cx,y+68); ctx.shadowBlur=0; ctx.globalAlpha=1; } ctx.restore(); }
-function drawProgress(p,x,y){ if(p.done) return; const total=p.questions.length, done=p.qIdx, col=p.num===1?COLORS.p1:COLORS.p2; ctx.save(); ctx.textAlign='center'; ctx.textBaseline='top'; ctx.font='700 13px Nunito'; ctx.fillStyle=hexAlpha(col,.55); ctx.fillText(`${done}/${total}`,x,y+2); ctx.restore(); }
-function drawTimer(W,H){ if(!gs||gs.over) return; const t=Math.ceil(Math.max(0,gs.timeLeft)), m=Math.floor(t/60), s=t%60, str=`${m}:${s.toString().padStart(2,'0')}`; ctx.save(); ctx.textAlign='center'; ctx.textBaseline='top'; ctx.font='bold 42px Bangers'; ctx.fillStyle=t<=10?'#ff4040':'#ffffff'; if(t<=10){ ctx.shadowColor='#ff4040'; ctx.shadowBlur=15; }else{ ctx.shadowColor='#ffffff'; ctx.shadowBlur=5; } ctx.fillText(str,W/2,20); ctx.restore(); }
-function drawHandLockStatus(W,H){ const faceCount=detectedFaces.length; ctx.save(); ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.font='700 11px Nunito'; const faceCol=faceCount>=2?'#40e070':faceCount===1?'#ffcc00':'#ff4040'; ctx.fillStyle=faceCol; ctx.shadowColor=faceCol; ctx.shadowBlur=faceCount>0?8:0; const faceLabel=faceCount===0?'😶 Chưa thấy mặt':faceCount===1?'😊 1 người — cần 2':'😊😊 2 mặt đã nhận diện'; ctx.fillText(faceLabel,W/2,62); ctx.shadowBlur=0; ctx.restore(); const assigned={1:false,2:false}; for(const label of ['Left','Right']){ const hs=handState[label]; if(hs.player) assigned[hs.player]=true; } [1,2].forEach(num=>{ if(num===2&&numPlayers===1) return; const col=num===1?COLORS.p1:COLORS.p2; const cx=num===1?W/4:W*3/4; const cy=H-100; const isOk=assigned[num]; ctx.save(); ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.font='700 12px Nunito'; ctx.fillStyle=isOk?hexAlpha(col,.7):hexAlpha('#ffffff',.2); ctx.shadowColor=isOk?col:'transparent'; ctx.shadowBlur=isOk?8:0; ctx.fillText(isOk?`🔒 P${num} tay đã khóa`:`✋ P${num} giơ tay lên`,cx,cy); ctx.restore(); }); }
-function drawQuestions(W,H){ const qH=70, qY=H-qH-14, pad=16; drawQuestionBox(gs.p1,W/4,qY,W/2-pad*2,qH,COLORS.p1); if(gs.p2) drawQuestionBox(gs.p2,W*3/4,qY,W/2-pad*2,qH,COLORS.p2); }
-function drawQuestionBox(p,cx,cy,maxW,h,col){ if(p.done||p.qIdx>=p.questions.length) return; const qText=p.questions[p.qIdx].q; ctx.save(); const bw=Math.min(maxW,measureTextWidth(qText,'700 24px Nunito')+60); roundRect(ctx,cx-bw/2,cy,bw,h,12); ctx.fillStyle='rgba(0,0,0,.72)'; ctx.fill(); ctx.strokeStyle=col; ctx.lineWidth=2; ctx.stroke(); ctx.font='800 14px Nunito'; ctx.fillStyle=hexAlpha(col,.7); ctx.textAlign='left'; ctx.textBaseline='middle'; ctx.fillText('Q:',cx-bw/2+12,cy+h/2); ctx.font='800 24px Nunito'; ctx.fillStyle='#ffffff'; ctx.textAlign='center'; ctx.textBaseline='middle'; ctx.shadowColor=col; ctx.shadowBlur=6; ctx.fillText(qText,cx,cy+h/2,maxW-50); ctx.shadowBlur=0; ctx.restore(); }
-function measureTextWidth(text,font){ ctx.save(); ctx.font=font; const w=ctx.measureText(text).width; ctx.restore(); return w; }
-function drawDoneOverlay(playerNum,W,H){ const p=playerNum===1?gs.p1:gs.p2; if(!p) return; const col=playerNum===1?COLORS.p1:COLORS.p2; const ox=playerNum===1?0:W/2; ctx.save(); ctx.fillStyle='rgba(0,0,0,.55)'; ctx.fillRect(ox,0,W/2,H); ctx.textAlign='center'; ctx.textBaseline='middle'; const msg=p.lives<=0?'💀 HẾT MẠNG':'🏁 XONG!'; ctx.font=`bold ${Math.min(48,W*.055)}px Bangers`; ctx.fillStyle=col; ctx.shadowColor=col; ctx.shadowBlur=24; ctx.fillText(msg,ox+W/4,H/2-24); ctx.shadowBlur=0; ctx.font=`700 ${Math.min(24,W*.028)}px Nunito`; ctx.fillStyle='rgba(255,255,255,.7)'; ctx.fillText(`${p.score} điểm`,ox+W/4,H/2+28); ctx.restore(); }
+  updatePlayer(gs.p1, dt);
+  updatePlayer(gs.p2, dt);
 
+  // Particles
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.x  += p.vx * dt;
+    p.y  += p.vy * dt;
+    p.vy += 0.18 * dt;
+    p.life -= p.decay * dt;
+    if (p.life <= 0) particles.splice(i, 1);
+  }
+
+  // Float texts
+  for (let i = floatTexts.length - 1; i >= 0; i--) {
+    const ft = floatTexts[i];
+    ft.y    += ft.vy * dt;
+    ft.life -= 0.022 * dt;
+    if (ft.life <= 0) floatTexts.splice(i, 1);
+  }
+
+  // Bonus bubbles — spawn theo cặp:
+  // Step 0: timer đầy → spawn bên 1, reset timer về BUBBLE_INTERVAL/7 (≈60f)
+  // Step 1: timer đầy lần nữa → spawn bên 2, reset về BUBBLE_INTERVAL bình thường
+  bubbleTimer += dt;
+  if (bubbleTimer >= BUBBLE_INTERVAL) {
+    if (bubblePairStep === 0) {
+      // Bắt đầu cặp mới: spawn bên đầu tiên, đặt timer ngắn cho bên còn lại
+      bubbleTimer = BUBBLE_INTERVAL - 60; // 60f sau sẽ spawn bên kia
+      spawnBonusBubble(); // sets bubblePairStep = firstSide
+    } else {
+      // Spawn bên còn lại, kết thúc cặp
+      bubbleTimer = 0;
+      spawnBonusBubble(); // resets bubblePairStep = 0
+    }
+  }
+  const H = canvas.height;
+  for (let i = bonusBubbles.length - 1; i >= 0; i--) {
+    const b = bonusBubbles[i];
+    b.wobble += 0.04 * dt;
+    b.pulse  += 0.08 * dt;
+    b.x += b.vx * dt;
+    b.y += b.vy * dt;
+    if (b.slashed) {
+      b.life -= 0.06 * dt;
+      if (b.life <= 0) bonusBubbles.splice(i, 1);
+    } else if (b.y + b.radius < -20) {
+      bonusBubbles.splice(i, 1);
+    }
+  }
+
+  // Flash & combo timers
+  if (gs.p1.flashOk  > 0) gs.p1.flashOk  -= dt;
+  if (gs.p1.flashErr > 0) gs.p1.flashErr -= dt;
+  if (gs.p1.comboDisplay > 0) gs.p1.comboDisplay -= dt;
+  if (gs.p2.flashOk  > 0) gs.p2.flashOk  -= dt;
+  if (gs.p2.flashErr > 0) gs.p2.flashErr -= dt;
+  if (gs.p2.comboDisplay > 0) gs.p2.comboDisplay -= dt;
+
+  // Trim slash trails
+  const now = performance.now();
+  for (const key in slashTrails) {
+    const tr = slashTrails[key];
+    tr.points = tr.points.filter(pt => now - pt.t < 220);
+    if (tr.points.length === 0 && tr.fading) delete slashTrails[key];
+  }
+}
+
+function updatePlayer(p, dt) {
+  if (p.done) return;
+
+  if (p.spawnDelay > 0) {
+    p.spawnDelay -= dt;
+    if (p.spawnDelay <= 0 && p.needsSpawn) spawnWordsForPlayer(p);
+    return;
+  }
+
+  if (p.needsSpawn) {
+    spawnWordsForPlayer(p);
+    return;
+  }
+
+  const W = canvas.width;
+  const H = canvas.height;
+  const [zL, zR] = playerZone(p.num, W);
+
+  for (const w of p.words) {
+    if (w.slashed) continue;
+
+    w.wobble += 0.035 * dt;
+    w.x += w.vx * dt;
+    w.y += w.vy * dt;
+
+    // Horizontal bounce within zone
+    if (w.x - w.radius < zL) { w.vx =  Math.abs(w.vx); w.x = zL + w.radius; }
+    if (w.x + w.radius > zR) { w.vx = -Math.abs(w.vx); w.x = zR - w.radius; }
+
+    // Respawn at bottom when off-screen top
+    if (w.y + w.radius < -20) {
+      w.y  = H + w.radius + Math.random() * 60;
+      w.x  = zL + (zR-zL) * (.15 + Math.random() * .7);
+      w.vy = -(1.3 + Math.random() * 1.0);
+    }
+
+    if (w.wrongAnim > 0) w.wrongAnim -= dt;
+  }
+}
+
+// ============================================================
+//  RENDER
+// ============================================================
+function render() {
+  const W = canvas.width, H = canvas.height;
+  ctx.clearRect(0, 0, W, H);
+
+  // Background
+  if (gameMode !== 'camera') {
+    ctx.fillStyle = '#080810';
+    ctx.fillRect(0, 0, W, H);
+    drawGrid(W, H);
+  } else {
+    ctx.fillStyle = 'rgba(4,4,12,.55)';
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  // Zone tints
+  drawZoneTint(gs.p1, 0, 0, W/2, H);
+  drawZoneTint(gs.p2, W/2, 0, W/2, H);
+
+  // Zone labels (faint)
+  drawZoneLabel(1, W, H);
+  drawZoneLabel(2, W, H);
+
+  // Center divider
+  drawDivider(W, H);
+
+  // Words
+  drawPlayerWords(gs.p1);
+  drawPlayerWords(gs.p2);
+
+  // Bonus bubbles
+  drawBonusBubbles();
+
+  // Particles
+  drawParticles();
+
+  // Float texts
+  drawFloatTexts();
+
+  // Slash trails
+  drawSlashTrails();
+
+  // Hand cursors (camera mode)
+  if (gameMode === 'camera') drawHandCursors();
+
+  // HUD
+  drawHUD(W, H);
+
+  // Questions
+  drawQuestions(W, H);
+
+  // Done overlays
+  if (gs.p1.done) drawDoneOverlay(1, W, H);
+  if (gs.p2.done) drawDoneOverlay(2, W, H);
+}
+
+// ---------- Background grid ----------
+function drawGrid(W, H) {
+  ctx.save();
+  ctx.strokeStyle = 'rgba(0,238,255,.025)';
+  ctx.lineWidth = 1;
+  const g = 44;
+  for (let x = 0; x < W; x += g) {
+    ctx.beginPath(); ctx.moveTo(x,0); ctx.lineTo(x,H); ctx.stroke();
+  }
+  for (let y = 0; y < H; y += g) {
+    ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(W,y); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// ---------- Zone tint ----------
+function drawZoneTint(p, x, y, w, h) {
+  if (p.flashOk > 0) {
+    ctx.fillStyle = `rgba(${p.num===1?'0,238,255':'255,34,102'},${p.flashOk/50*.1})`;
+    ctx.fillRect(x, y, w, h);
+  } else if (p.flashErr > 0) {
+    ctx.fillStyle = `rgba(255,40,40,${p.flashErr/50*.18})`;
+    ctx.fillRect(x, y, w, h);
+  }
+}
+
+// ---------- Faint zone label ----------
+function drawZoneLabel(num, W, H) {
+  const col  = num === 1 ? COLORS.p1 : COLORS.p2;
+  const cx   = num === 1 ? W/4 : W*3/4;
+  ctx.save();
+  ctx.font = `bold ${Math.min(120, W*.12)}px Bangers`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = hexAlpha(col, .04);
+  ctx.fillText(`P${num}`, cx, H/2);
+  ctx.restore();
+}
+
+// ---------- Divider ----------
+function drawDivider(W, H) {
+  const x = W / 2;
+  const grd = ctx.createLinearGradient(x, 0, x, H);
+  grd.addColorStop(0,   'transparent');
+  grd.addColorStop(.15, COLORS.p1);
+  grd.addColorStop(.5,  '#ffffff');
+  grd.addColorStop(.85, COLORS.p2);
+  grd.addColorStop(1,   'transparent');
+
+  ctx.save();
+  ctx.shadowColor = '#ffffff';
+  ctx.shadowBlur  = 18;
+  ctx.strokeStyle = grd;
+  ctx.lineWidth   = 2.5;
+  ctx.beginPath();
+  ctx.moveTo(x, 0);
+  ctx.lineTo(x, H);
+  ctx.stroke();
+  ctx.restore();
+}
+
+// ---------- Words ----------
+function drawPlayerWords(p) {
+  for (const w of p.words) {
+    if (w.slashed && w.wrongAnim <= 0) continue;
+
+    const col   = p.num === 1 ? COLORS.p1 : COLORS.p2;
+    const wobX  = Math.sin(w.wobble) * 4;
+    const wrongProgress = w.wrongAnim / 60;
+
+    ctx.save();
+    ctx.globalAlpha = w.slashed ? 0 : Math.max(.2, 1 - (1 - wrongProgress) * .5 + wrongProgress*.5);
+    ctx.translate(w.x + wobX, w.y);
+
+    // Glow
+    ctx.shadowColor = col;
+    ctx.shadowBlur  = 22;
+
+    // Orb gradient
+    const gr = ctx.createRadialGradient(0, -w.radius*.15, 0, 0, 0, w.radius);
+    gr.addColorStop(0,   hexAlpha(col, .3));
+    gr.addColorStop(.6,  hexAlpha(col, .12));
+    gr.addColorStop(1,   hexAlpha(col, .03));
+
+    ctx.beginPath();
+    ctx.arc(0, 0, w.radius, 0, Math.PI*2);
+    ctx.fillStyle = gr;
+    ctx.fill();
+
+    // Rim
+    ctx.strokeStyle = col;
+    ctx.lineWidth   = 1.8;
+    ctx.stroke();
+
+    // Inner highlight
+    ctx.shadowBlur  = 0;
+    ctx.strokeStyle = hexAlpha('#ffffff', .2);
+    ctx.lineWidth   = 1;
+    ctx.beginPath();
+    ctx.arc(-w.radius*.2, -w.radius*.3, w.radius*.4, Math.PI*1.2, Math.PI*1.9);
+    ctx.stroke();
+
+    // Text — hỗ trợ multi-line wrap
+    ctx.font         = `700 ${w.fontSize}px Nunito`;
+    ctx.textAlign    = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle    = '#ffffff';
+    ctx.shadowColor  = col;
+    ctx.shadowBlur   = 8;
+    const lines = w.lines || [w.text];
+    const lh    = w.lineH || w.fontSize * 1.25;
+    const totalH = (lines.length - 1) * lh;
+    lines.forEach((line, li) => {
+      ctx.fillText(line, 0, -totalH / 2 + li * lh);
+    });
+    ctx.shadowBlur = 0;
+
+    // Wrong X overlay
+    if (w.wrongAnim > 0) {
+      const xa = Math.min(1, wrongProgress * 3);
+      ctx.strokeStyle = `rgba(255,50,50,${xa})`;
+      ctx.lineWidth   = 4;
+      ctx.lineCap     = 'round';
+      const sz = w.radius * .55;
+      ctx.beginPath();
+      ctx.moveTo(-sz,-sz); ctx.lineTo(sz,sz);
+      ctx.moveTo(sz,-sz);  ctx.lineTo(-sz,sz);
+      ctx.stroke();
+    }
+
+    ctx.restore();
+  }
+}
+
+// ---------- Bonus Bubbles ----------
+function drawBonusBubbles() {
+  for (const b of bonusBubbles) {
+    if (b.life <= 0) continue;
+    const wobX = Math.sin(b.wobble) * 5;
+    const pulse = 1 + Math.sin(b.pulse) * .07;
+
+    ctx.save();
+    ctx.globalAlpha = b.slashed ? Math.max(0, b.life) : 1;
+    ctx.translate(b.x + wobX, b.y);
+    ctx.scale(pulse, pulse);
+
+    // Glow ring
+    ctx.shadowColor = b.color;
+    ctx.shadowBlur  = 28;
+
+    // Outer ring (dashed feel via arc)
+    ctx.strokeStyle = b.color;
+    ctx.lineWidth   = 2.5;
+    ctx.setLineDash([8, 5]);
+    ctx.beginPath();
+    ctx.arc(0, 0, b.radius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // Fill
+    const gr = ctx.createRadialGradient(0, -b.radius*.2, 0, 0, 0, b.radius);
+    gr.addColorStop(0, hexAlpha(b.color, .35));
+    gr.addColorStop(1, hexAlpha(b.color, .07));
+    ctx.beginPath();
+    ctx.arc(0, 0, b.radius, 0, Math.PI * 2);
+    ctx.fillStyle = gr;
+    ctx.fill();
+
+    // Icon
+    ctx.shadowBlur = 0;
+    ctx.font = `${Math.round(b.radius * .68)}px serif`;
+    ctx.textAlign    = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(b.icon, 0, -4);
+
+    // Label
+    ctx.font      = `800 ${Math.round(b.radius * .32)}px Nunito`;
+    ctx.fillStyle = b.color;
+    ctx.shadowColor = b.color;
+    ctx.shadowBlur  = 6;
+    ctx.fillText(b.label, 0, b.radius * .62);
+
+    ctx.restore();
+  }
+}
+
+// ---------- Float Texts ----------
+function drawFloatTexts() {
+  for (const ft of floatTexts) {
+    ctx.save();
+    ctx.globalAlpha  = Math.max(0, ft.life);
+    ctx.textAlign    = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font         = `800 ${ft.text.length > 6 ? 18 : 26}px Nunito`;
+    ctx.fillStyle    = ft.color;
+    ctx.shadowColor  = ft.color;
+    ctx.shadowBlur   = 14;
+    ctx.fillText(ft.text, ft.x, ft.y);
+    ctx.restore();
+  }
+}
+function drawParticles() {
+  for (const p of particles) {
+    ctx.save();
+    ctx.globalAlpha = Math.max(0, p.life);
+    ctx.fillStyle   = p.color;
+    ctx.shadowColor = p.color;
+    ctx.shadowBlur  = 10;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, Math.max(.5, p.size * p.life), 0, Math.PI*2);
+    ctx.fill();
+    ctx.restore();
+  }
+}
+
+// ---------- Slash trails ----------
+function drawSlashTrails() {
+  const now = performance.now();
+  for (const key in slashTrails) {
+    const tr = slashTrails[key];
+    if (tr.points.length < 2) continue;
+
+    ctx.save();
+    ctx.lineCap  = 'round';
+    ctx.lineJoin = 'round';
+
+    for (let i = 1; i < tr.points.length; i++) {
+      const pt   = tr.points[i];
+      const prev = tr.points[i - 1];
+      const age  = now - pt.t;
+      const a    = Math.max(0, 1 - age / 200) * .85;
+      const w    = (i / tr.points.length) * 7;
+
+      ctx.globalAlpha = a;
+      ctx.strokeStyle = tr.color;
+      ctx.shadowColor = tr.color;
+      ctx.shadowBlur  = 12;
+      ctx.lineWidth   = w;
+      ctx.beginPath();
+      ctx.moveTo(prev.x, prev.y);
+      ctx.lineTo(pt.x, pt.y);
+      ctx.stroke();
+    }
+
+    // Bright tip
+    const tip = tr.points[tr.points.length - 1];
+    const tipAge = now - tip.t;
+    const tipA   = Math.max(0, 1 - tipAge / 120);
+    ctx.globalAlpha = tipA;
+    ctx.fillStyle   = '#ffffff';
+    ctx.shadowColor = '#ffffff';
+    ctx.shadowBlur  = 20;
+    ctx.beginPath();
+    ctx.arc(tip.x, tip.y, 4, 0, Math.PI*2);
+    ctx.fill();
+
+    ctx.restore();
+  }
+}
+
+// ---------- Hand cursors (with lock-state visuals) ----------
+function drawHandCursors() {
+  for (const h of handPositions) {
+    if (!h) continue;
+
+    const col    = h.player === 1 ? COLORS.p1 : COLORS.p2;
+    const isNew  = h.lockFrames > 0;
+    const lockT  = isNew ? 1 - h.lockFrames / 80 : 1;   // 0→1 as lock-pop plays
+    const gAlpha = h.ghostAlpha ?? 1;                    // fades when hand lost
+
+    ctx.save();
+    ctx.globalAlpha = gAlpha;
+
+    // ── Ring ────────────────────────────────────────────────
+    const baseR    = 22;
+    const popScale = isNew ? 1 + Math.sin(lockT * Math.PI) * 0.8 : 1;
+
+    if (h.inZone) {
+      ctx.strokeStyle = col;
+      ctx.fillStyle   = hexAlpha(col, .15);
+      ctx.shadowColor = col;
+      ctx.shadowBlur  = 30;
+    } else {
+      ctx.strokeStyle = '#ff4040';
+      ctx.fillStyle   = 'rgba(255,40,40,.08)';
+      ctx.shadowColor = '#ff4040';
+      ctx.shadowBlur  = 18;
+      ctx.globalAlpha = gAlpha * 0.6;
+    }
+
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.arc(h.x, h.y, baseR * popScale, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // ── Center dot ──────────────────────────────────────────
+    ctx.shadowBlur  = 0;
+    ctx.globalAlpha = h.inZone ? gAlpha : gAlpha * 0.5;
+    ctx.fillStyle   = col;
+    ctx.beginPath();
+    ctx.arc(h.x, h.y, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // ── Lock-pop label (shown for first 80 frames after detection) ──
+    if (isNew && lockT < 0.85) {
+      const labelAlpha = lockT < 0.15
+        ? lockT / 0.15
+        : lockT > 0.7 ? 1 - (lockT - 0.7) / 0.15 : 1;
+
+      ctx.globalAlpha  = labelAlpha * gAlpha;
+      ctx.font         = `800 ${Math.round(14 + 6 * Math.sin(lockT * Math.PI))}px Nunito`;
+      ctx.textAlign    = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle    = col;
+      ctx.shadowColor  = col;
+      ctx.shadowBlur   = 18;
+      ctx.fillText(`🔒 P${h.player} LOCKED`, h.x, h.y - baseR - 18);
+      ctx.shadowBlur   = 0;
+    }
+
+    // ── Out-of-zone warning ─────────────────────────────────
+    if (!h.inZone) {
+      ctx.globalAlpha  = 0.75 * gAlpha;
+      ctx.font         = '800 13px Nunito';
+      ctx.textAlign    = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.fillStyle    = '#ff4040';
+      ctx.shadowColor  = '#ff4040';
+      ctx.shadowBlur   = 10;
+      ctx.fillText('⛔ SAI VÙNG', h.x, h.y - baseR - 14);
+      ctx.shadowBlur   = 0;
+    }
+
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+}
+// ---------- HUD ----------
+function drawHUD(W, H) {
+  drawPlayerHUD(gs.p1, 18, 14, 'left');
+  drawPlayerHUD(gs.p2, W - 18, 14, 'right');
+  drawProgress(gs.p1, W/4, 10);
+  drawProgress(gs.p2, W*3/4, 10);
+  drawTimer(W, H);
+
+  // Camera mode: show hand-lock status at the bottom of each zone
+  if (gameMode === 'camera') drawHandLockStatus(W, H);
+}
+
+function drawHandLockStatus(W, H) {
+  // ── Face detection indicator (top-center) ──────────────────
+  const faceCount = detectedFaces.length;
+  ctx.save();
+  ctx.textAlign    = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.font         = '700 11px Nunito';
+  const faceCol    = faceCount >= 2 ? '#40e070' : faceCount === 1 ? '#ffcc00' : '#ff4040';
+  ctx.fillStyle    = faceCol;
+  ctx.shadowColor  = faceCol;
+  ctx.shadowBlur   = faceCount > 0 ? 8 : 0;
+  const faceLabel  = faceCount === 0 ? '😶 Chưa thấy mặt'
+                   : faceCount === 1 ? '😊 1 người — cần 2'
+                   : '😊😊 2 mặt đã nhận diện';
+  ctx.fillText(faceLabel, W / 2, 62);
+  ctx.shadowBlur = 0;
+  ctx.restore();
+
+  // ── Per-player hand-lock status ─────────────────────────────
+  const assigned = { 1: false, 2: false };
+  for (const label of ['Left', 'Right']) {
+    const hs = handState[label];
+    if (hs.player) assigned[hs.player] = true;
+  }
+
+  [1, 2].forEach(num => {
+    const col  = num === 1 ? COLORS.p1 : COLORS.p2;
+    const cx   = num === 1 ? W / 4 : W * 3 / 4;
+    const cy   = H - 100;
+    const isOk = assigned[num];
+
+    ctx.save();
+    ctx.textAlign    = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font         = '700 12px Nunito';
+    ctx.fillStyle    = isOk ? hexAlpha(col, .7) : hexAlpha('#ffffff', .2);
+    ctx.shadowColor  = isOk ? col : 'transparent';
+    ctx.shadowBlur   = isOk ? 8 : 0;
+    ctx.fillText(isOk ? `🔒 P${num} tay đã khóa` : `✋ P${num} giơ tay lên`, cx, cy);
+    ctx.restore();
+  });
+}
+
+function drawPlayerHUD(p, x, y, align) {
+  const col = p.num === 1 ? COLORS.p1 : COLORS.p2;
+
+  ctx.save();
+  ctx.textAlign    = align;
+  ctx.textBaseline = 'top';
+
+  // Score
+  ctx.font      = `bold 36px Bangers`;
+  ctx.fillStyle = col;
+  ctx.shadowColor = col;
+  ctx.shadowBlur  = 12;
+  ctx.fillText(p.score, x, y);
+
+  ctx.shadowBlur = 0;
+
+  // Lives (hearts)
+  const full  = '❤️';
+  const empty = '🖤';
+  const heartStr = full.repeat(p.lives) + empty.repeat(MAX_LIVES - p.lives);
+  ctx.font = `${Math.max(18, Math.min(24, canvas.width * .027))}px serif`;
+  ctx.fillText(heartStr, x, y + 40);
+
+  // Combo display
+  if (p.comboDisplay > 0 && p.lastCombo >= 2) {
+    const ca = Math.min(1, p.comboDisplay / 30);
+    ctx.globalAlpha = ca;
+    ctx.font        = `bold ${Math.min(22, canvas.width * .025)}px Bangers`;
+    ctx.fillStyle   = '#ffdd00';
+    ctx.shadowColor = '#ff8800';
+    ctx.shadowBlur  = 16;
+    const cx = p.num === 1 ? x + 2 : x - 2;
+    const labelAlign = align;
+    ctx.textAlign = labelAlign;
+    ctx.fillText(`🔥 ${p.lastCombo}x COMBO!`, cx, y + 68);
+    ctx.shadowBlur  = 0;
+    ctx.globalAlpha = 1;
+  }
+
+  ctx.restore();
+}
+
+function drawProgress(p, x, y) {
+  if (p.done) return;
+  const total = p.questions.length;
+  const done  = p.qIdx;
+  const col   = p.num === 1 ? COLORS.p1 : COLORS.p2;
+  const label = `${done}/${total}`;
+
+  ctx.save();
+  ctx.textAlign    = 'center';
+  ctx.textBaseline = 'top';
+  ctx.font         = '700 13px Nunito';
+  ctx.fillStyle    = hexAlpha(col, .55);
+  ctx.fillText(label, x, y + 2);
+  ctx.restore();
+}
+
+function drawTimer(W, H) {
+  if (!gs || gs.over) return;
+  const t = Math.ceil(Math.max(0, gs.timeLeft));
+  const m = Math.floor(t / 60);
+  const s = t % 60;
+  const str = `${m}:${s.toString().padStart(2, '0')}`;
+
+  ctx.save();
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'top';
+  ctx.font = 'bold 42px Bangers';
+  ctx.fillStyle = t <= 10 ? '#ff4040' : '#ffffff';
+  if (t <= 10) {
+    ctx.shadowColor = '#ff4040';
+    ctx.shadowBlur = 15;
+  } else {
+    ctx.shadowColor = '#ffffff';
+    ctx.shadowBlur = 5;
+  }
+  ctx.fillText(str, W / 2, 20);
+  ctx.restore();
+}
+
+// ---------- Questions ----------
+function drawQuestions(W, H) {
+  const qH  = 70;
+  const qY  = H - qH - 14;
+  const pad = 16;
+
+  drawQuestionBox(gs.p1, W/4, qY, W/2 - pad*2, qH, COLORS.p1);
+  drawQuestionBox(gs.p2, W*3/4, qY, W/2 - pad*2, qH, COLORS.p2);
+}
+
+function drawQuestionBox(p, cx, cy, maxW, h, col) {
+  if (p.done || p.qIdx >= p.questions.length) return;
+
+  const qText = p.questions[p.qIdx].q;
+
+  ctx.save();
+
+  // Box background
+  const bw = Math.min(maxW, measureTextWidth(qText, '700 24px Nunito') + 60);
+  roundRect(ctx, cx - bw/2, cy, bw, h, 12);
+  ctx.fillStyle   = 'rgba(0,0,0,.72)';
+  ctx.fill();
+  ctx.strokeStyle = col;
+  ctx.lineWidth   = 2;
+  ctx.stroke();
+
+  // "Q:" badge
+  ctx.font         = '800 14px Nunito';
+  ctx.fillStyle    = hexAlpha(col, .7);
+  ctx.textAlign    = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText('Q:', cx - bw/2 + 12, cy + h/2);
+
+  // Question text
+  ctx.font         = '800 24px Nunito';
+  ctx.fillStyle    = '#ffffff';
+  ctx.textAlign    = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.shadowColor  = col;
+  ctx.shadowBlur   = 6;
+  ctx.fillText(qText, cx, cy + h/2, maxW - 50);
+  ctx.shadowBlur   = 0;
+
+  ctx.restore();
+}
+
+function measureTextWidth(text, font) {
+  ctx.save();
+  ctx.font = font;
+  const w = ctx.measureText(text).width;
+  ctx.restore();
+  return w;
+}
+
+// ---------- Done overlay ----------
+function drawDoneOverlay(playerNum, W, H) {
+  const p   = playerNum === 1 ? gs.p1 : gs.p2;
+  const col = playerNum === 1 ? COLORS.p1 : COLORS.p2;
+  const ox  = playerNum === 1 ? 0 : W/2;
+
+  ctx.save();
+  ctx.fillStyle = 'rgba(0,0,0,.55)';
+  ctx.fillRect(ox, 0, W/2, H);
+
+  ctx.textAlign    = 'center';
+  ctx.textBaseline = 'middle';
+
+  const msg = p.lives <= 0 ? '💀 HẾT MẠNG' : '🏁 XONG!';
+  ctx.font      = `bold ${Math.min(48,W*.055)}px Bangers`;
+  ctx.fillStyle = col;
+  ctx.shadowColor = col;
+  ctx.shadowBlur  = 24;
+  ctx.fillText(msg, ox + W/4, H/2 - 24);
+
+  ctx.shadowBlur  = 0;
+  ctx.font        = `700 ${Math.min(24,W*.028)}px Nunito`;
+  ctx.fillStyle   = 'rgba(255,255,255,.7)';
+  ctx.fillText(`${p.score} điểm`, ox + W/4, H/2 + 28);
+
+  ctx.restore();
+}
+
+// ============================================================
+//  GAME OVER
+// ============================================================
+function checkGameOver() {
+  if (!gs) return;
+  // Check if both players are done, or time is up
+  const bothDone = gs.p1.done && gs.p2.done;
+  if (!bothDone && gs.timeLeft > 0) return;
+
+  gs.running = false;
+  gs.over    = true;
+
+  setTimeout(() => showGameOverScreen(), 1600);
+}
+
+function showGameOverScreen() {
+  if (bgAudio) bgAudio.pause();
+  removeTouchEvents();
+
+  const s1 = gs.p1.score;
+  const s2 = gs.p2.score;
+
+  document.getElementById('goScore1').textContent = s1;
+  document.getElementById('goScore2').textContent = s2;
+  document.getElementById('goBadge1').innerHTML   = '';
+  document.getElementById('goBadge2').innerHTML   = '';
+
+  const title = document.getElementById('goTitle');
+  if (s1 > s2) {
+    title.textContent = '🏆 PLAYER 1 THẮNG!';
+    title.style.color = 'var(--p1)';
+    document.getElementById('goBadge1').innerHTML = '<span class="winner-badge">⭐ WINNER</span>';
+  } else if (s2 > s1) {
+    title.textContent = '🏆 PLAYER 2 THẮNG!';
+    title.style.color = 'var(--p2)';
+    document.getElementById('goBadge2').innerHTML = '<span class="winner-badge">⭐ WINNER</span>';
+  } else {
+    title.textContent = '🤝 HOÀ!';
+    title.style.color = '#ffcc00';
+  }
+
+  document.getElementById('gameoverScreen').style.display = 'flex';
+}
+
+// ============================================================
+//  UTILITIES
+// ============================================================
+function shuffleArr(arr) {
+  for (let i = arr.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [arr[i], arr[j]] = [arr[j], arr[i]];
+  }
+  return arr;
+}
+
+function hexAlpha(hex, alpha) {
+  const r = parseInt(hex.slice(1,3), 16);
+  const g = parseInt(hex.slice(3,5), 16);
+  const b = parseInt(hex.slice(5,7), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
+}
+
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x+r, y);
+  ctx.lineTo(x+w-r, y);
+  ctx.quadraticCurveTo(x+w, y, x+w, y+r);
+  ctx.lineTo(x+w, y+h-r);
+  ctx.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+  ctx.lineTo(x+r, y+h);
+  ctx.quadraticCurveTo(x, y+h, x, y+h-r);
+  ctx.lineTo(x, y+r);
+  ctx.quadraticCurveTo(x, y, x+r, y);
+  ctx.closePath();
+}
+
+// ============================================================
+//  INIT
+// ============================================================
 resizeCanvas();
-setStatus('Cần ít nhất 6 câu hỏi để chơi.');
+setStatus('Cần ít nhất 6 câu hỏi để chơi 2 người.');
 </script>
 </body>
 </html>
