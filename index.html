@@ -564,7 +564,7 @@ const COLORS = {
 };
 
 const WORD_BASE_RADIUS = 52; // base min radius
-const WORD_BASE_RADIUS_SOLO = 72; // bigger bubbles for solo mode
+const WORD_BASE_RADIUS_SOLO = 84; // bigger bubbles for solo mode
 const MAX_LIVES = 3;
 const SPAWN_DELAY_FRAMES = 70;
 
@@ -949,7 +949,7 @@ function spawnWordsForPlayer(p) {
   const [zL, zR] = playerZone(p.num, W);
   const zW = zR - zL;
 
-  const baseFontSize = Math.max(15, Math.min(soloMode ? 26 : 20, canvas.width * (soloMode ? 0.024 : 0.017)));
+  const baseFontSize = Math.max(15, Math.min(soloMode ? 30 : 20, canvas.width * (soloMode ? 0.028 : 0.017)));
   ctx.font = `700 ${baseFontSize}px Nunito`;
   const lineH = baseFontSize * 1.25;   // khoảng cách giữa các dòng
 
@@ -1451,10 +1451,8 @@ function _spawnOneSide(type, side) {
 
 function spawnBonusBubble() {
   if (soloMode) {
-    // Solo: just one bubble at a time, full-width zone
     if (bubbleQueue.length === 0) _refillBubbleQueue();
-    const type = bubbleQueue.pop();
-    _spawnOneSide(type, 1);
+    _spawnOneSide(bubbleQueue.pop(), 1);
     return;
   }
 
@@ -1577,19 +1575,21 @@ function update(dt, rawDt) {
     if (ft.life <= 0) floatTexts.splice(i, 1);
   }
 
-  // Bonus bubbles — spawn theo cặp:
-  // Step 0: timer đầy → spawn bên 1, reset timer về BUBBLE_INTERVAL/7 (≈60f)
-  // Step 1: timer đầy lần nữa → spawn bên 2, reset về BUBBLE_INTERVAL bình thường
+  // Bonus bubbles spawn logic
   bubbleTimer += dt;
-  if (bubbleTimer >= BUBBLE_INTERVAL) {
-    if (bubblePairStep === 0) {
-      // Bắt đầu cặp mới: spawn bên đầu tiên, đặt timer ngắn cho bên còn lại
-      bubbleTimer = BUBBLE_INTERVAL - 60; // 60f sau sẽ spawn bên kia
-      spawnBonusBubble(); // sets bubblePairStep = firstSide
-    } else {
-      // Spawn bên còn lại, kết thúc cặp
+  if (soloMode) {
+    // Solo: single bubble, much less frequent (2.5× the normal interval)
+    if (bubbleTimer >= BUBBLE_INTERVAL * 2.5) {
       bubbleTimer = 0;
-      spawnBonusBubble(); // resets bubblePairStep = 0
+      spawnBonusBubble();
+    }
+  } else if (bubbleTimer >= BUBBLE_INTERVAL) {
+    if (bubblePairStep === 0) {
+      bubbleTimer = BUBBLE_INTERVAL - 60;
+      spawnBonusBubble();
+    } else {
+      bubbleTimer = 0;
+      spawnBonusBubble();
     }
   }
   const H = canvas.height;
